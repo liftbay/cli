@@ -10,7 +10,7 @@ import { ciInitCommand, initCommand, otaInitCommand } from "./commands/setup.ts"
 import { channels, list, publish, rollback, rollout } from "./commands/update.ts";
 import { signingInit } from "./commands/signing.ts";
 
-const program = new Command("liftbay").description("Build, ship and update React Native apps").version("0.1.0");
+const program = new Command("liftbay").description("Build, ship and update React Native apps").version("0.1.1");
 const wrap =
   <A extends unknown[]>(fn: (...args: A) => Promise<unknown>) =>
   async (...args: A): Promise<void> => {
