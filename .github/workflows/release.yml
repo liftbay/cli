@@ -1,0 +1,35 @@
+# Publishes liftbay to npm from a version tag (v1.2.3), built here in public with npm provenance,
+# so the npm page links each version to this repository, commit and workflow run.
+#
+# Setup: add an npm automation token as the repository secret NPM_TOKEN
+# (or configure npm "trusted publishing" for this repository and workflow, then drop the token).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+      - name: Tag matches package.json
+        run: |
+          version=$(node -p "require('./package.json').version")
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME doesn't match package.json version $version"; exit 1; }
+      - run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - run: npm run typecheck && npm test && npm run build
+      - name: Smoke test the packed CLI
+        run: npm pack && mkdir /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null && npm install "$GITHUB_WORKSPACE"/liftbay-*.tgz && npx liftbay --help
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

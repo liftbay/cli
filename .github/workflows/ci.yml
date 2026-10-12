@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      - run: npm run typecheck && npm test && npm run build
+      - name: Smoke test the packed CLI
+        run: npm pack && mkdir /tmp/smoke && cd /tmp/smoke && npm init -y >/dev/null && npm install "$GITHUB_WORKSPACE"/liftbay-*.tgz && npx liftbay --help
+      - run: npm pack --dry-run
