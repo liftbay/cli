@@ -13,13 +13,13 @@ Requires Node.js 20 or newer. In CI, set `LIFTBAY_TOKEN` to an organization API 
 
 ## For AI agents
 
-This repository includes an agent skill that teaches Claude Code, Codex, Cursor and other coding agents to use Liftbay:
+The Liftbay agent skill teaches Claude Code, Codex, Cursor and other coding agents to use Liftbay:
 
 ```sh
-npx skills add liftbay/cli
+npx skills add liftbay/skills
 ```
 
-The skill is [`skills/liftbay/SKILL.md`](skills/liftbay/SKILL.md). Every command accepts `--json`: stdout then holds one JSON result or `{"error": …}`, progress goes to stderr, and nothing prompts. Guide: https://liftbay.dev/docs/agents
+It's published at [liftbay/skills](https://github.com/liftbay/skills), and ships in this package too, as `skills/liftbay/SKILL.md`. Every command accepts `--json`: stdout then holds one JSON result or `{"error": …}`, progress goes to stderr, and nothing prompts. Guide: https://liftbay.dev/docs/agents
 
 ## Commands
 
