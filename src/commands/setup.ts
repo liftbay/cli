@@ -140,8 +140,8 @@ export async function ciInit(app: DetectedApp, config: LiftbayConfig, opts: Setu
  */
 async function githubStep(): Promise<GithubCheck | { error: string }> {
   try {
-    const s = await ensureGithub({ needWorkflow: true, soft: !isInteractive() });
-    if (s.connected && s.workflow === "present") p.log.success(`GitHub is ready: ${s.repo}`);
+    const s = await ensureGithub({ needWorkflow: false, soft: !isInteractive() });
+    if (s.connected) p.log.success(`GitHub is ready: ${s.repo}`);
     else if (!isInteractive()) p.log.warn(`GitHub isn't ready yet${s.installUrl ? `: install the Liftbay GitHub App ${s.installUrl}` : ""}. ${cmd("liftbay github status")} shows what's left.`);
     return s;
   } catch (e) {
@@ -319,9 +319,8 @@ export async function initCommand(opts: SetupOptions & { ota?: boolean }) {
       `Done. ${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}`)}`,
       "",
       "  Next:",
-      `  1. Commit liftbay.json, .github/workflows/liftbay.yml, app.json and package.json, and push this branch`,
-      `  2. Build:   ${pc.cyan(cmd("liftbay build"))}`,
-      ...(wantOta ? [`  3. Update:  ${pc.cyan(cmd("liftbay update publish --channel preview"))} ${pc.dim("(after a build from this setup is installed)")}`] : []),
+      `  1. Build:   ${pc.cyan(cmd("liftbay build"))} ${pc.dim("(offers to commit the setup and push this branch)")}`,
+      ...(wantOta ? [`  2. Update:  ${pc.cyan(cmd("liftbay update publish --channel preview"))} ${pc.dim("(after a build from this setup is installed)")}`] : []),
       ...(cmd("liftbay") !== "liftbay" ? ["", pc.dim(`  Tip: ${pc.cyan("npm i -g liftbay")} to type ${pc.cyan("liftbay")} instead of ${pc.cyan("npx liftbay")}.`)] : []),
     ].join("\n"),
   );

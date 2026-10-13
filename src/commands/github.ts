@@ -174,13 +174,14 @@ export async function githubStatus() {
   const mark = (ok: boolean) => (ok ? pc.green("✔") : pc.red("✖"));
   console.log(`${mark(!!s.repo)} Repository       ${s.repo ?? pc.dim("none: push the app to GitHub, then liftbay ci init")}`);
   console.log(`${mark(s.connected)} GitHub App       ${s.connected ? "installed" : pc.dim(`not installed: ${cmd("liftbay github connect")}`)}`);
+  const branch = s.defaultBranch ?? "the default branch";
   console.log(
-    `${mark(s.workflow === "present")} Workflow         ${
+    `${s.workflow === "present" ? pc.green("✔") : pc.dim("○")} Workflow on ${branch.padEnd(6)} ${
       s.workflow === "present"
-        ? `on ${s.defaultBranch}`
+        ? "yes"
         : !s.connected
           ? pc.dim("checked once the GitHub App is installed")
-          : pc.dim(`${s.workflow} on ${s.defaultBranch ?? "the default branch"}: ${cmd("liftbay github workflow")}`)
+          : pc.dim(`no: optional. Builds run it from your branch until it's there (${cmd("liftbay github workflow")} opens a pull request)`)
     }`,
   );
   return s;
@@ -191,7 +192,10 @@ export async function githubConnect(opts: { wait?: boolean }) {
   return ensureGithub({ needWorkflow: false, soft: true, wait: opts.wait });
 }
 
-/** Opens (or updates) the pull request that adds the workflow on the default branch. */
+/**
+ * Opens (or updates) the pull request that adds the workflow on the default branch. Optional: without it, builds
+ * run the workflow from the built branch's own commit through a temporary liftbay/build/* branch.
+ */
 export async function githubWorkflow(opts: { wait?: boolean }) {
   const config = requireConfig();
   const lb = client();

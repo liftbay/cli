@@ -62,15 +62,16 @@ To set up one part on its own, use `liftbay ci init --yes --json` (builds) or `l
 
 Pass `--ios-engine github-actions|xcode-cloud` for where iOS **store** builds run; it's saved as `build.iosEngine` in `liftbay.json`. Xcode Cloud uses the Apple team's free hours, and needs iOS signing and `liftbay xcode-cloud connect` first. Internal (ad hoc) and simulator builds always run on GitHub Actions.
 
-Then get GitHub ready. Builds start a workflow through the Liftbay GitHub App, and GitHub only starts workflows that are on the repository's **default branch**:
+Then get GitHub ready. Builds start the workflow through the Liftbay GitHub App:
 
 ```bash
-liftbay github status --json      # repo linked? app installed? workflow on the default branch?
+liftbay github status --json      # repo linked? app installed?
 liftbay github connect --json     # not installed: returns installUrl; give it to the user to open, then check status again
-liftbay github workflow --json    # workflow missing: opens a pull request that adds it; the user merges it
 ```
 
-Finally, commit `liftbay.json`, `.github/workflows/liftbay.yml`, `app.json` and `package.json`, and push the branch you'll build. `liftbay build` refuses a branch that isn't on GitHub, because builds check out what's pushed.
+Then commit `liftbay.json`, `.github/workflows/liftbay.yml`, `app.json`, `package.json` and the lockfile, and push the branch you'll build. Builds use what's pushed, and `liftbay build` refuses a branch that isn't pushed or has the setup uncommitted.
+
+The workflow doesn't need to be on the default branch. Until it is, Liftbay runs it from the built branch's own commit through a temporary `liftbay/build/<platform>/<id>` branch, which it deletes once the build has started. Merging it into the default branch is optional: `liftbay github workflow --json` opens that pull request.
 
 `liftbay.json` defines three build profiles:
 
@@ -241,8 +242,9 @@ An update only reaches binaries with the same runtime version. When native code 
 | Build fails at once: no GitHub repository | Push the app to GitHub, then `liftbay ci init --yes --json` |
 | Build fails: workflow not found / 404 | Commit and push `.github/workflows/liftbay.yml` on the branch you build |
 | `github_not_connected`, or "GitHub App isn't installed" | `liftbay github connect --json`, give the user the `installUrl` |
-| "isn't on GitHub yet. Push it first" | `git push -u origin <branch>` |
-| "only starts workflows that are on the default branch" | `liftbay github workflow --json`; the user merges the pull request |
+| "isn't on GitHub yet" / "isn't pushed" | `git push -u origin <branch>` |
+| "The Liftbay setup isn't committed" | Commit the files it lists, push |
+| Build log: "isn't in <branch>" or "from an older Liftbay" | `liftbay ci init --yes`, commit `.github/workflows/liftbay.yml`, push, build again |
 | "Xcode Cloud isn't connected yet" | iOS signing, then `liftbay xcode-cloud connect`; or `--engine github-actions` |
 | iOS build is a simulator build | No iOS signing yet: section 4 |
 | App builds but can't reach its backend | Missing env variables: `liftbay env list -e <env>`, then section 3 |

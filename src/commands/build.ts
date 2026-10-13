@@ -43,6 +43,70 @@ function pushState(branch: string): { upstream: boolean; ahead: number } {
   }
 }
 
+/** Files `liftbay init` writes or changes; uncommitted, they're the setup the build would be missing. */
+const SETUP_FILES = ["liftbay.json", ".github/workflows/liftbay.yml", "app.json", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"];
+
+function git(args: string[]) {
+  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+/** Runs git with the terminal attached, so a push can ask for credentials. */
+function gitLoud(args: string[]) {
+  try {
+    execFileSync("git", args, { stdio: "inherit" });
+  } catch {
+    fail(`\`git ${args.join(" ")}\` failed. Fix that, then build again.`);
+  }
+}
+
+/**
+ * Makes sure what's built is what's here: the Liftbay setup committed, and the branch pushed. In a terminal it
+ * offers to do both; otherwise it fails with the commands, so an agent can run them.
+ */
+async function readyToBuild(branch: string, interactive: boolean) {
+  const changed = git(["status", "--porcelain", "--", ...SETUP_FILES])
+    .split("\n")
+    .filter(Boolean)
+    .map((l) => l.slice(3).replace(/^"|"$/g, ""));
+  // Only liftbay.json and the workflow mark the setup as uncommitted; app.json and package files may hold unrelated edits.
+  if (changed.some((f) => f === "liftbay.json" || f.startsWith(".github/"))) {
+    const files = changed.filter((f) => f !== "" && SETUP_FILES.some((s) => f === s || f.startsWith(".github/")));
+    const message = `The Liftbay setup isn't committed on ${branch}: ${files.join(", ")}.`;
+    if (!interactive) fail(`${message} Commit it: git add ${files.join(" ")} && git commit -m "Set up Liftbay", then push.`);
+    p.log.warn(message);
+    if (!cancelled(await p.confirm({ message: `Commit ${files.length > 1 ? "these files" : "it"} on ${branch} now?`, initialValue: true }))) {
+      fail(`Commit them first: git add ${files.join(" ")} && git commit -m "Set up Liftbay"`);
+    }
+    git(["add", "--", ...files]);
+    gitLoud(["commit", "--quiet", "-m", "Set up Liftbay", "--", ...files]);
+    p.log.success(`Committed "Set up Liftbay" on ${branch}`);
+  }
+  const other = git(["status", "--porcelain"]).split("\n").filter(Boolean).length;
+  if (other) p.log.info(pc.dim(`${other} other uncommitted change${other > 1 ? "s" : ""} here won't be in the build: it uses what's on GitHub.`));
+
+  const pushed = pushState(branch);
+  if (!pushed.upstream || pushed.ahead > 0) {
+    const what = !pushed.upstream ? `${branch} isn't on GitHub yet` : `${pushed.ahead} commit${pushed.ahead > 1 ? "s" : ""} on ${branch} ${pushed.ahead > 1 ? "aren't" : "isn't"} pushed`;
+    const command = !pushed.upstream ? ["push", "-u", "origin", branch] : ["push"];
+    if (!interactive) fail(`${what}. Builds use what's on GitHub: git ${command.join(" ")}`);
+    const choice = cancelled(
+      await p.select({
+        message: `${what}. Builds use what's on GitHub.`,
+        options: [
+          { value: "push", label: `Push now`, hint: `git ${command.join(" ")}` },
+          ...(pushed.upstream ? [{ value: "as-is", label: "Build what's on GitHub" }] : []),
+          { value: "stop", label: "Stop" },
+        ],
+      }),
+    );
+    if (choice === "stop") fail(`Push when you're ready: git ${command.join(" ")}`);
+    if (choice === "push") {
+      gitLoud([command[0]!, "--quiet", ...command.slice(1)]);
+      p.log.success(`Pushed ${branch}`);
+    }
+  }
+}
+
 /**
  * Queues one build per platform, then follows the logs until they finish. In a terminal, whatever isn't passed
  * as a flag is asked: profile, platform, and where iOS builds run. Before queuing, it checks the branch is
@@ -145,20 +209,13 @@ export async function build(opts: BuildOptions) {
   }
   const engineFor = (platform: Platform): Engine => (platform === "ios" ? iosEngine : "github-actions");
 
-  // 4. The branch must be on GitHub: builds check out what's pushed there.
-  const gitRef = opts.ref ?? currentBranch() ?? "main";
-  if (!opts.ref) {
-    const pushed = pushState(gitRef);
-    if (!pushed.upstream) fail(`The branch ${gitRef} isn't on GitHub yet. Push it first: git push -u origin ${gitRef}`);
-    if (pushed.ahead > 0) {
-      const note = `${pushed.ahead} commit${pushed.ahead > 1 ? "s" : ""} on ${gitRef} ${pushed.ahead > 1 ? "aren't" : "isn't"} pushed; the build uses what's on GitHub.`;
-      if (interactive && !cancelled(await p.confirm({ message: `${note} Build anyway?`, initialValue: false }))) fail(`Push first: git push`);
-      if (!interactive) p.log.warn(note);
-    }
-  }
+  // 4. The branch must be on GitHub with the Liftbay setup in it: builds check out what's pushed there.
+  const gitRef = opts.ref ?? currentBranch() ?? fail("This isn't a git branch (detached HEAD?). Check out a branch, or pass --ref <branch|tag|commit>.");
+  if (!opts.ref) await readyToBuild(gitRef, interactive);
 
-  // 5. GitHub App, and the workflow on the default branch (Xcode Cloud builds need the app too).
-  await ensureGithub({ needWorkflow: platforms.some((pl) => engineFor(pl) !== "xcode-cloud") });
+  // 5. The GitHub App (Xcode Cloud builds need it too). The workflow doesn't have to be on the default branch:
+  //    Liftbay then runs it from this branch's commit through a temporary liftbay/build/* branch.
+  await ensureGithub({ needWorkflow: false });
 
   // 6. Like EAS: the first signed iOS build offers to set up signing instead of quietly building for the simulator.
   if (platforms.includes("ios") && !opts.simulator) {
