@@ -15,6 +15,29 @@ function cancelled<T>(value: T): Exclude<T, symbol> {
 }
 export { cancelled };
 
+const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+
+/**
+ * A new account has no organization yet: create one, like the dashboard's onboarding. The name is --org, a prompt,
+ * or (for agents) the person's name or email.
+ */
+async function createFirstOrg(lb: ReturnType<typeof client>, given?: string) {
+  const me = await unwrap(lb.GET("/v1/auth/me"));
+  const suggested = given ?? (me.user.name?.trim() || me.user.email.split("@")[0]!);
+  const name = isInteractive() && !given ? cancelled(await p.text({ message: "Name your organization", initialValue: suggested, validate: (v) => (slugify(v ?? "").length >= 2 ? undefined : "At least 2 letters or digits") })) : suggested;
+  const base = slugify(name).padEnd(2, "0");
+  // The slug is the organization's URL (liftbay.dev/<slug>); add a short suffix if it's taken.
+  for (const slug of [base, `${base.slice(0, 35)}-${Math.random().toString(36).slice(2, 6)}`]) {
+    const res = await lb.POST("/v1/orgs", { body: { name: name.slice(0, 64), slug } });
+    if (res.data) {
+      p.log.success(`Created organization ${pc.bold(res.data.name)} ${pc.dim(`(liftbay.dev/${res.data.slug})`)}`);
+      return res.data;
+    }
+    if (res.response.status !== 409) await unwrap(Promise.resolve(res));
+  }
+  return fail("Couldn't pick a free organization URL. Pass --org <slug>.");
+}
+
 /** Links this folder to a Liftbay project, creating the project if needed. Idempotent. */
 export async function ensureLinked(app: DetectedApp, opts: LinkOptions): Promise<LiftbayConfig> {
   const existing = readConfig();
@@ -24,7 +47,7 @@ export async function ensureLinked(app: DetectedApp, opts: LinkOptions): Promise
   }
   const lb = client();
   const orgs = await unwrap(lb.GET("/v1/orgs"));
-  if (!orgs.length) fail("You're not in any organization yet. Create one at the dashboard first.");
+  if (!orgs.length) orgs.push(await createFirstOrg(lb, opts.org));
 
   let org = opts.org ?? (orgs.length === 1 ? orgs[0]!.slug : undefined);
   if (!org) {

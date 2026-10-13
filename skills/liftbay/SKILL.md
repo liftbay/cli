@@ -52,7 +52,7 @@ This detects the app (Expo or bare React Native), creates or links the Liftbay p
 **Coming from EAS:** when the app has an `eas.json`, `init` uses it. Each EAS build profile becomes a Liftbay build profile with the same name, channel and distribution, and its `env` (with `extends` resolved) goes into an environment of the same name. Pass `--no-eas` to use Liftbay's default profiles instead.
 
 Useful flags:
-- `--org <slug>`: required if the user is in several organizations; the error lists them.
+- `--org <slug>`: required if the user is in several organizations; the error lists them. For a new account with no organization yet, `init` creates one, named after `--org` or the person's name.
 - `--project <slug>`
 - `--platforms ios|android|all`
 - `--runtime-policy appVersion|fingerprint`

@@ -14,7 +14,7 @@ import { envExport, envImport, envList, envSet, envUnset } from "./commands/env.
 
 const program = new Command("liftbay")
   .description("Build, ship and update React Native apps")
-  .version("0.3.0")
+  .version("0.3.1")
   .option("--json", "print the result as JSON on stdout (progress goes to stderr; never prompts). Also LIFTBAY_JSON=1")
   .hook("preAction", () => {
     if (program.opts().json || process.env.LIFTBAY_JSON === "1") enableJson();
