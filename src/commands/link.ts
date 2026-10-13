@@ -15,6 +15,9 @@ function cancelled<T>(value: T): Exclude<T, symbol> {
 }
 export { cancelled };
 
+/** A project's URL name: lowercase letters, digits and dashes, like the API accepts. */
+const slugifyProject = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 
 /**
@@ -57,21 +60,37 @@ export async function ensureLinked(app: DetectedApp, opts: LinkOptions): Promise
 
   const projects = await unwrap(lb.GET("/v1/orgs/{org}/projects", { params: { path: { org } } }));
   let slug = opts.project;
+  let projectName: string | undefined;
   if (!slug) {
     const match = projects.find((pr) => pr.slug === app.slug);
     if (opts.yes || !isInteractive()) slug = match?.slug ?? app.slug;
     else {
+      const taken = projects.some((pr) => pr.slug === app.slug);
       const choice = cancelled(
         await p.select({
           message: "Liftbay project",
           options: [
-            { value: "__new__", label: `Create "${app.slug}"`, hint: "new project" },
-            ...projects.map((pr) => ({ value: pr.slug, label: pr.name, hint: pr.slug })),
+            ...(taken ? [] : [{ value: "__new__", label: `Create "${app.name}"`, hint: `new project · liftbay.dev/${org}/${app.slug}` }]),
+            { value: "__named__", label: "Create a project with another name" },
+            ...projects.map((pr) => ({ value: pr.slug, label: pr.name, hint: `existing · ${pr.slug}` })),
           ],
-          initialValue: match?.slug ?? "__new__",
+          initialValue: match?.slug ?? (taken ? "__named__" : "__new__"),
         }),
       );
-      slug = choice === "__new__" ? app.slug : choice;
+      if (choice === "__named__") {
+        projectName = cancelled(
+          await p.text({
+            message: "Project name",
+            initialValue: app.name,
+            validate: (v) => {
+              const s = slugifyProject(v ?? "");
+              if (s.length < 2) return "At least 2 letters or digits";
+              if (projects.some((pr) => pr.slug === s)) return `${s} already exists: pick it from the list instead`;
+            },
+          }),
+        );
+        slug = slugifyProject(projectName);
+      } else slug = choice === "__new__" ? app.slug : choice;
     }
   }
 
@@ -80,7 +99,7 @@ export async function ensureLinked(app: DetectedApp, opts: LinkOptions): Promise
     project = await unwrap(
       lb.POST("/v1/orgs/{org}/projects", {
         params: { path: { org } },
-        body: { name: app.name, slug: slug!, framework: app.framework, bundleId: app.bundleId, androidPackage: app.androidPackage },
+        body: { name: projectName ?? app.name, slug: slug!, framework: app.framework, bundleId: app.bundleId, androidPackage: app.androidPackage },
       }),
     );
     p.log.success(`Created project ${pc.bold(`${org}/${project.slug}`)} with development, preview and production environments`);

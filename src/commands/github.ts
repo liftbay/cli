@@ -46,6 +46,43 @@ async function waitFor(lb: Lb, config: LiftbayConfig, message: string, done: (s:
   return null;
 }
 
+type Attempt = { status: "waiting" | "needs_sign_in" | "wrong_account" | "connected" | "cancelled" | "forbidden" | "taken" | "failed" | "expired"; message: string };
+
+/**
+ * Follows one install until the repository is covered. The API reports what happened when GitHub sent the browser
+ * back (signed in, cancelled, another account…); the project status confirms the repository itself is covered.
+ */
+async function waitForInstall(lb: Lb, config: LiftbayConfig, attempt: string | undefined): Promise<{ ok: true; status: Status } | { ok: false; message: string }> {
+  const spin = p.spinner();
+  spin.start(`Waiting for the GitHub App to be installed ${pc.dim("(Ctrl-C to stop)")}`);
+  const until = Date.now() + WAIT_MINUTES * 60_000;
+  let last: Attempt["status"] = "waiting";
+  while (Date.now() < until) {
+    await sleep(3000);
+    const a = attempt
+      ? ((await lb.GET("/v1/orgs/{org}/github/install/{attempt}", { params: { path: { org: config.org, attempt } } })).data as Attempt | undefined)
+      : undefined;
+    if (a && a.status !== last) {
+      last = a.status;
+      if (a.status === "needs_sign_in") spin.message(`GitHub is done. Sign in to Liftbay in that browser to finish linking ${pc.dim("(Ctrl-C to stop)")}`);
+      else if (a.status !== "waiting" && a.status !== "connected") {
+        spin.error("GitHub didn't connect");
+        return { ok: false, message: a.message };
+      }
+    }
+    const s = await status(lb, config);
+    if (s.connected) {
+      spin.stop(`GitHub App installed for ${s.repo}`);
+      return { ok: true, status: s };
+    }
+    if (a?.status === "connected") {
+      spin.message(`Installed on ${s.repo!.split("/")[0]}, but without access to ${s.repo}: on GitHub, Configure the app and select the repository ${pc.dim("(Ctrl-C to stop)")}`);
+    }
+  }
+  spin.error("Stopped waiting");
+  return { ok: false, message: "The GitHub App wasn't installed within 15 minutes." };
+}
+
 export type GithubCheck = Status & { installUrl?: string; pullRequestUrl?: string | null };
 
 /**
@@ -66,25 +103,34 @@ export async function ensureGithub(opts: { needWorkflow: boolean; soft?: boolean
   const owner = s.repo!.split("/")[0];
 
   if (!s.connected) {
-    const { url } = await unwrap(lb.POST("/v1/orgs/{org}/github/install", { params: { path: { org: config.org } } }));
     p.log.warn(`The Liftbay GitHub App isn't installed for ${pc.bold(s.repo!)} yet. Builds run through it.`);
-    if (!interactive) {
-      if (opts.soft) return { ...s, installUrl: url };
-      fail(`Install the Liftbay GitHub App on ${owner} (give it access to ${s.repo}): ${url}\nThen run this again. In the dashboard: ${dashboardUrl()}/${config.org}/github`);
+    for (let round = 0; ; round++) {
+      const { url, attempt } = (await unwrap(lb.POST("/v1/orgs/{org}/github/install", { params: { path: { org: config.org } } }))) as { url: string; attempt?: string };
+      if (!interactive) {
+        if (opts.soft) return { ...s, installUrl: url };
+        fail(`Install the Liftbay GitHub App on ${owner} (give it access to ${s.repo}): ${url}\nThen run this again. In the dashboard: ${dashboardUrl()}/${config.org}/github`);
+      }
+      // The link goes on a line of its own: wrapped inside a box, terminals no longer open it as one link.
+      p.log.step(round ? "Install the Liftbay GitHub App (new link)" : "Install the Liftbay GitHub App");
+      p.log.message(
+        pc.dim(
+          `Pick ${pc.bold(owner!)}, give it access to ${pc.bold(s.repo!.split("/")[1]!)} (or all repositories), and install.\n` +
+            `Already installed on ${owner}? Choose Configure, make sure the repository is selected, and save.\n` +
+            `Copying the link instead? Open it in a browser signed in to ${dashboardUrl().replace(/^https?:\/\//, "")}, or sign in when asked.`,
+        ),
+      );
+      console.log(`\n${pc.cyan(url)}\n`);
+      openBrowser(url);
+      const result = await waitForInstall(lb, config, attempt);
+      if (result.ok) {
+        s = result.status;
+        break;
+      }
+      p.log.error(result.message);
+      if (!cancelled(await p.confirm({ message: "Try again with a new link?", initialValue: true }))) {
+        fail(`GitHub isn't connected. Finish at ${dashboardUrl()}/${config.org}/github, or run \`liftbay github connect\` again.`);
+      }
     }
-    // The link goes on a line of its own: wrapped inside a box, terminals no longer open it as one link.
-    p.log.step("Install the Liftbay GitHub App");
-    p.log.message(
-      pc.dim(`Pick ${pc.bold(owner!)}, give it access to ${pc.bold(s.repo!.split("/")[1]!)} (or all repositories) and save.\nAlready installed on GitHub? Choose Configure, check the repository is selected and save.`),
-    );
-    console.log(`\n${pc.cyan(url)}\n`);
-    if (!cancelled(await p.confirm({ message: "Open this in your browser now?", initialValue: true }))) {
-      fail(`Install it from the link above, or at ${dashboardUrl()}/${config.org}/github, then run this again.`);
-    }
-    openBrowser(url);
-    const done = await waitFor(lb, config, "Waiting for the GitHub App to be installed", (x) => x.connected);
-    if (!done) fail(`The GitHub App isn't installed yet. Finish at ${dashboardUrl()}/${config.org}/github, then run this again.`);
-    s = done;
   }
 
   if (opts.needWorkflow && s.workflow !== "present") {
