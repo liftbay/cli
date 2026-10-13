@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { client, fail, isInteractive, unwrap } from "../context.ts";
+import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
 import { readConfig, writeConfig, type DetectedApp, type LiftbayConfig } from "../project.ts";
 
 export type LinkOptions = { org?: string; project?: string; yes?: boolean };
@@ -90,6 +90,6 @@ export async function ensureLinked(app: DetectedApp, opts: LinkOptions): Promise
 
   const config: LiftbayConfig = { org, project: project.slug, projectId: project.id };
   writeConfig(config);
-  p.log.info(`Wrote ${pc.cyan("liftbay.json")} ${pc.dim("(commit it: it links this repository to the project)")}`);
+  p.log.info(`Wrote ${pc.cyan(cmd("liftbay.json"))} ${pc.dim("(commit it: it links this repository to the project)")}`);
   return config;
 }

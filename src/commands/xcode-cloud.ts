@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { client, fail, isInteractive, unwrap } from "../context.ts";
+import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
 
 type ConnectOptions = { teamId?: string; workspace?: string; scheme?: string; wait?: boolean };
@@ -34,7 +34,7 @@ export async function xcodeCloudConnect(opts: ConnectOptions) {
     const s = (await unwrap(lb.POST("/v1/orgs/{org}/projects/{project}/xcode-cloud/connect", { params: { path }, body }))) as Status;
     if (s.step === "ready") {
       printStatus(s);
-      p.outro(`iOS store builds now run on Xcode Cloud while hours remain. Force an engine with ${pc.cyan("liftbay build --engine xcode-cloud|github-actions")}`);
+      p.outro(`iOS store builds now run on Xcode Cloud while hours remain. Force an engine with ${pc.cyan(cmd("liftbay build --engine xcode-cloud|github-actions"))}`);
       return s;
     }
     if (s.step !== last) printStatus(s);

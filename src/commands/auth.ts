@@ -4,7 +4,7 @@ import { join } from "node:path";
 import * as p from "@clack/prompts";
 import { createLiftbayClient, LiftbayApiError } from "@liftbay/sdk";
 import pc from "picocolors";
-import { apiUrl, CONFIG_DIR, clearCredentials, client, dashboardUrl, fail, isInteractive, readCredentials, saveCredentials, unwrap } from "../context.ts";
+import { apiUrl, clearCredentials, client, cmd, CONFIG_DIR, dashboardUrl, fail, isInteractive, readCredentials, saveCredentials, unwrap } from "../context.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -61,7 +61,7 @@ export async function login(opts: { apiUrl?: string; dashboardUrl?: string; open
 
   p.note(`${pc.bold(pending.userCode)}\n\n${pc.dim("Confirm this code in your browser:")}\n${pending.url}`, "Sign in");
   if (opts.wait === false) {
-    p.log.info(`Approve it in the browser, then run ${pc.cyan("liftbay login")} again to finish.`);
+    p.log.info(`Approve it in the browser, then run ${pc.cyan(cmd("liftbay login"))} again to finish.`);
     return { status: "pending", userCode: pending.userCode, url: pending.url, expiresAt: pending.expiresAt, next: "Approve in the browser, then run `liftbay login` to finish signing in" };
   }
 

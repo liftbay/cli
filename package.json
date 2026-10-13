@@ -1,6 +1,6 @@
 {
   "name": "liftbay",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Build, sign, submit and update React Native apps from your own CI.",
   "keywords": [
     "react-native",
@@ -47,6 +47,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@clack/core": "1.5.1",
     "@clack/prompts": "^1.8.1",
     "@liftbay/sdk": "^0.1.0",
     "@types/node": "^26.6.4",

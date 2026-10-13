@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { client, fail, isInteractive, unwrap } from "../context.ts";
+import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
 import { cancelled } from "./link.ts";
 
@@ -173,7 +173,7 @@ export async function envList(opts: { environment?: string }) {
     return { environments: envs.map(({ slug, name, variableCount, revision, updatedAt }) => ({ slug, name, variableCount, revision, updatedAt })) };
   }
   const vars = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/environments/{env}/variables", { params: { path: { ...path, env: opts.environment } } }));
-  if (!vars.length) console.log(`No variables in ${opts.environment}. Add some with ${pc.cyan(`liftbay env import .env --environment ${opts.environment}`)}`);
+  if (!vars.length) console.log(`No variables in ${opts.environment}. Add some with ${pc.cyan(cmd(`liftbay env import .env --environment ${opts.environment}`))}`);
   for (const v of vars) {
     const shown = v.visibility === "plain" ? (v.value ?? "") : v.visibility === "secret" ? pc.dim("(secret)") : pc.dim("•••••• (sensitive)");
     console.log(`${v.key.padEnd(36)} ${shown}`);

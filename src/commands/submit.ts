@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { client, dashboardUrl, fail, unwrap } from "../context.ts";
+import { client, cmd, dashboardUrl, fail, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
 
 type Platform = "ios" | "android";
@@ -34,7 +34,7 @@ export async function submit(opts: SubmitOptions) {
     queued.push(s);
   }
   if (opts.wait === false) {
-    p.outro(`Queued. Follow along with ${pc.cyan("liftbay submissions list")} or in the dashboard: ${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}/submissions`)}`);
+    p.outro(`Queued. Follow along with ${pc.cyan(cmd("liftbay submissions list"))} or in the dashboard: ${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}/submissions`)}`);
     return { submissions: queued };
   }
 
@@ -69,7 +69,7 @@ export async function credentialsAndroidCommand(opts: { playKey?: string; remove
   }
   if (!opts.playKey) {
     const status = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/stores/google-play", { params: { path } }));
-    console.log(status ? `Google Play service account: ${status.clientEmail}` : `No Google Play service account. Add one with ${pc.cyan("liftbay credentials android --play-key key.json")}`);
+    console.log(status ? `Google Play service account: ${status.clientEmail}` : `No Google Play service account. Add one with ${pc.cyan(cmd("liftbay credentials android --play-key key.json"))}`);
     return { googlePlay: status };
   }
   let json: string;

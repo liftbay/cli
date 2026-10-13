@@ -60,9 +60,17 @@ Useful flags:
 
 To set up one part on its own, use `liftbay ci init --yes --json` (builds) or `liftbay ota init --yes --json` (OTA).
 
-Then:
-1. Commit `liftbay.json`, `.github/workflows/liftbay.yml`, `app.json` and `package.json`, and push. Builds only work on branches that contain the workflow file.
-2. The user installs the **Liftbay GitHub App** on the repository's owner at `https://liftbay.dev/<org>/github`. Builds start the workflow through it.
+Pass `--ios-engine github-actions|xcode-cloud` for where iOS **store** builds run; it's saved as `build.iosEngine` in `liftbay.json`. Xcode Cloud uses the Apple team's free hours, and needs iOS signing and `liftbay xcode-cloud connect` first. Internal (ad hoc) and simulator builds always run on GitHub Actions.
+
+Then get GitHub ready. Builds start a workflow through the Liftbay GitHub App, and GitHub only starts workflows that are on the repository's **default branch**:
+
+```bash
+liftbay github status --json      # repo linked? app installed? workflow on the default branch?
+liftbay github connect --json     # not installed: returns installUrl; give it to the user to open, then check status again
+liftbay github workflow --json    # workflow missing: opens a pull request that adds it; the user merges it
+```
+
+Finally, commit `liftbay.json`, `.github/workflows/liftbay.yml`, `app.json` and `package.json`, and push the branch you'll build. `liftbay build` refuses a branch that isn't on GitHub, because builds check out what's pushed.
 
 `liftbay.json` defines three build profiles:
 
@@ -133,6 +141,8 @@ liftbay build --platform android --profile preview --no-wait --json
 liftbay build --platform ios --profile production --no-wait --json
 ```
 
+Always pass `--platform` and `--profile`. In a terminal the CLI asks for anything left out, but as an agent you have no terminal, so it would fall back to the `production` profile and all of its platforms. Before queuing, `build` checks that the branch is pushed and that GitHub is ready, and fails with what to fix.
+
 The result is `{"builds": [{"number": 12, "platform": "ios", "status": "queued", "url": ...}]}`. Builds take about 5–40 minutes, iOS longer. Check progress:
 
 ```bash
@@ -148,7 +158,7 @@ Statuses: `queued` → `preparing` → `running` → `uploading` → `succeeded`
 Other flags:
 - `--ref <branch|tag|sha>`: defaults to the current branch, which must be pushed.
 - `--simulator`: unsigned iOS simulator build; needs no Apple account.
-- `--engine github-actions|xcode-cloud`
+- `--engine github-actions|xcode-cloud`: overrides `build.iosEngine` for this build (Xcode Cloud: iOS store builds only)
 - `-m "message"`
 
 **Xcode Cloud (optional):** `liftbay xcode-cloud connect --json`. Its error says which one-time step the user has to do in App Store Connect.
@@ -230,7 +240,10 @@ An update only reaches binaries with the same runtime version. When native code 
 | `Several organizations available; pass --org` | Pass `--org <slug>` from the list in the message |
 | Build fails at once: no GitHub repository | Push the app to GitHub, then `liftbay ci init --yes --json` |
 | Build fails: workflow not found / 404 | Commit and push `.github/workflows/liftbay.yml` on the branch you build |
-| `github_not_connected` | User installs the Liftbay GitHub App at `liftbay.dev/<org>/github` |
+| `github_not_connected`, or "GitHub App isn't installed" | `liftbay github connect --json`, give the user the `installUrl` |
+| "isn't on GitHub yet. Push it first" | `git push -u origin <branch>` |
+| "only starts workflows that are on the default branch" | `liftbay github workflow --json`; the user merges the pull request |
+| "Xcode Cloud isn't connected yet" | iOS signing, then `liftbay xcode-cloud connect`; or `--engine github-actions` |
 | iOS build is a simulator build | No iOS signing yet: section 4 |
 | App builds but can't reach its backend | Missing env variables: `liftbay env list -e <env>`, then section 3 |
 | `Pass --environment` | The file name doesn't match an environment; pass `-e <slug>` |

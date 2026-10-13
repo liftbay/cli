@@ -27,7 +27,8 @@ It's published at [liftbay/skills](https://github.com/liftbay/skills), and ships
 |---|---|
 | `login`, `logout`, `whoami` | Account |
 | `init`, `ci init`, `ota init` | Set up builds and updates for the app in this folder |
-| `build` | Queue builds on your GitHub Actions and follow their logs |
+| `github status`, `github connect`, `github workflow` | The Liftbay GitHub App and the build workflow on your default branch |
+| `build` | Queue builds on your GitHub Actions or Xcode Cloud and follow their logs |
 | `builds list`, `builds view`, `builds logs`, `builds download`, `builds cancel` | Look at builds and their artifacts |
 | `submit`, `submissions list`, `submissions view` | TestFlight and Google Play uploads |
 | `device add`, `device list`, `device remove` | iOS test devices for ad hoc builds |

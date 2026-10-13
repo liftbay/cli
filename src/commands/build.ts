@@ -2,10 +2,11 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import QRCode from "qrcode";
 import { execFileSync } from "node:child_process";
-import { client, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
+import { client, cmd, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
 import { setUpIos } from "./credentials.ts";
 import { cancelled } from "./link.ts";
-import { requireConfig } from "../project.ts";
+import { requireConfig, writeConfig } from "../project.ts";
+import { ensureGithub } from "./github.ts";
 import type { components } from "@liftbay/sdk";
 
 type Platform = "ios" | "android";
@@ -27,29 +28,146 @@ function currentBranch(): string | null {
   }
 }
 
-/** Queues one build per platform on the customer's GitHub Actions, then follows the logs until they finish. */
+/** Upstream state of the branch being built: builds use what's on GitHub, not this machine. */
+function pushState(branch: string): { upstream: boolean; ahead: number } {
+  try {
+    execFileSync("git", ["rev-parse", "--abbrev-ref", `${branch}@{u}`], { stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return { upstream: false, ahead: 0 };
+  }
+  try {
+    const ahead = Number(execFileSync("git", ["rev-list", "--count", `${branch}@{u}..${branch}`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim());
+    return { upstream: true, ahead: Number.isFinite(ahead) ? ahead : 0 };
+  } catch {
+    return { upstream: true, ahead: 0 };
+  }
+}
+
+/**
+ * Queues one build per platform, then follows the logs until they finish. In a terminal, whatever isn't passed
+ * as a flag is asked: profile, platform, and where iOS builds run. Before queuing, it checks the branch is
+ * pushed and GitHub is ready, so a build never fails for setup reasons it could have caught here.
+ */
 export async function build(opts: BuildOptions) {
-  const config = requireConfig();
+  let config = requireConfig();
   const lb = client();
-  const profileName = opts.profile ?? "production";
-  const profile = config.build?.profiles[profileName] ?? fail(`No build profile "${profileName}" in liftbay.json. Run \`liftbay ci init\`.`);
-  const platforms: Platform[] = !opts.platform || opts.platform === "all" ? profile.platforms : [opts.platform as Platform];
-  if (!platforms.every((x) => x === "ios" || x === "android")) fail("--platform must be ios, android or all");
-  const gitRef = opts.ref ?? currentBranch() ?? "main";
-  const engine = (opts.engine ?? "auto") as Engine;
-  if (!["auto", "github-actions", "xcode-cloud"].includes(engine)) fail("--engine must be auto, github-actions or xcode-cloud");
+  const interactive = isInteractive();
   const path = { org: config.org, project: config.project };
+  const profiles = config.build?.profiles ?? fail("No build profiles in liftbay.json. Run `liftbay ci init`.");
+  if (opts.engine && !["auto", "github-actions", "xcode-cloud"].includes(opts.engine)) fail("--engine must be auto, github-actions or xcode-cloud");
 
   p.intro(pc.bgCyan(pc.black(" liftbay build ")));
 
-  // Like EAS: the first signed iOS build offers to set up signing instead of quietly building for the simulator.
+  // 1. Profile
+  let profileName = opts.profile;
+  if (!profileName) {
+    const names = Object.keys(profiles);
+    profileName =
+      interactive && names.length > 1
+        ? cancelled(
+            await p.select({
+              message: "Build profile",
+              options: names.map((n) => ({
+                value: n,
+                label: n,
+                hint: `${profiles[n]!.distribution === "store" ? "for TestFlight and Google Play" : "to install on test devices"} · env ${profiles[n]!.environment}`,
+              })),
+              initialValue: profiles.preview ? "preview" : names[0],
+            }),
+          )
+        : profiles.production
+          ? "production"
+          : names[0]!;
+  }
+  const profile = profiles[profileName] ?? fail(`No build profile "${profileName}" in liftbay.json (${Object.keys(profiles).join(", ")}).`);
+
+  // 2. Platforms
+  let platforms: Platform[];
+  if (opts.platform) {
+    platforms = opts.platform === "all" ? profile.platforms : [opts.platform as Platform];
+    if (!platforms.every((x) => x === "ios" || x === "android")) fail("--platform must be ios, android or all");
+  } else if (interactive && profile.platforms.length > 1) {
+    const choice = cancelled(
+      await p.select({
+        message: "Platform",
+        options: [
+          { value: "android", label: "Android" },
+          { value: "ios", label: "iOS" },
+          { value: "all", label: "Both" },
+        ],
+      }),
+    );
+    platforms = choice === "all" ? profile.platforms : [choice as Platform];
+  } else platforms = profile.platforms;
+
+  // 3. Where iOS builds run
+  // Xcode Cloud makes iOS store builds only; internal (ad hoc) and simulator builds always run on GitHub Actions.
+  const storeIos = platforms.includes("ios") && !opts.simulator && profile.distribution === "store";
+  let iosEngine: Engine = (opts.engine as Engine | undefined) ?? config.build?.iosEngine ?? "auto";
+  if (!storeIos && iosEngine === "xcode-cloud") {
+    if (opts.engine === "xcode-cloud") fail(`Xcode Cloud makes iOS store builds only; profile "${profileName}" is ${opts.simulator ? "a simulator" : `an ${profile.distribution}`} build. Use a store profile, or --engine github-actions.`);
+    iosEngine = "github-actions";
+  }
+  if (storeIos) {
+    if (!opts.engine && !config.build?.iosEngine && interactive) {
+      iosEngine = cancelled(
+        await p.select({
+          message: "Where should iOS builds run?",
+          options: [
+            { value: "github-actions" as const, label: "GitHub Actions", hint: "macOS runners on your GitHub minutes" },
+            { value: "xcode-cloud" as const, label: "Xcode Cloud", hint: "25 free hours a month with the Apple Developer Program" },
+          ],
+        }),
+      );
+      config = { ...config, build: { ...config.build!, iosEngine } };
+      writeConfig(config);
+      p.log.info(pc.dim("Saved in liftbay.json (commit it). Override once with --engine."));
+    }
+    if (iosEngine === "xcode-cloud") {
+      const xc = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/xcode-cloud", { params: { path } }));
+      if (!xc.connected) {
+        p.log.warn(`Xcode Cloud isn't connected yet: ${xc.message}`);
+        const fallback =
+          interactive &&
+          cancelled(
+            await p.select({
+              message: "This iOS build",
+              options: [
+                { value: true, label: "Build it on GitHub Actions" },
+                { value: false, label: "Stop, and set up Xcode Cloud first", hint: cmd("liftbay xcode-cloud connect") },
+              ],
+            }),
+          );
+        if (!fallback) fail(`Set up Xcode Cloud with \`liftbay xcode-cloud connect\`${xc.actionUrl ? ` (${xc.actionUrl})` : ""}, or build on GitHub Actions with --engine github-actions.`);
+        iosEngine = "github-actions";
+      }
+    }
+  }
+  const engineFor = (platform: Platform): Engine => (platform === "ios" ? iosEngine : "github-actions");
+
+  // 4. The branch must be on GitHub: builds check out what's pushed there.
+  const gitRef = opts.ref ?? currentBranch() ?? "main";
+  if (!opts.ref) {
+    const pushed = pushState(gitRef);
+    if (!pushed.upstream) fail(`The branch ${gitRef} isn't on GitHub yet. Push it first: git push -u origin ${gitRef}`);
+    if (pushed.ahead > 0) {
+      const note = `${pushed.ahead} commit${pushed.ahead > 1 ? "s" : ""} on ${gitRef} ${pushed.ahead > 1 ? "aren't" : "isn't"} pushed; the build uses what's on GitHub.`;
+      if (interactive && !cancelled(await p.confirm({ message: `${note} Build anyway?`, initialValue: false }))) fail(`Push first: git push`);
+      if (!interactive) p.log.warn(note);
+    }
+  }
+
+  // 5. GitHub App, and the workflow on the default branch (Xcode Cloud builds need the app too).
+  await ensureGithub({ needWorkflow: platforms.some((pl) => engineFor(pl) !== "xcode-cloud") });
+
+  // 6. Like EAS: the first signed iOS build offers to set up signing instead of quietly building for the simulator.
   if (platforms.includes("ios") && !opts.simulator) {
     const signing = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/signing", { params: { path } }));
     if (!signing.ios) {
-      if (isInteractive() && cancelled(await p.confirm({ message: "iOS signing isn't set up. Sign in with your Apple ID and set it up now?", initialValue: true }))) {
+      if (interactive && cancelled(await p.confirm({ message: "iOS signing isn't set up. Sign in with your Apple ID and set it up now?", initialValue: true }))) {
         await setUpIos({});
       } else {
-        p.log.warn(`No iOS signing yet: this iOS build is a simulator build. Run ${pc.cyan("liftbay credentials ios")} for signed builds.`);
+        p.log.warn(`No iOS signing yet: this iOS build is a simulator build. Run ${pc.cyan(cmd("liftbay credentials ios"))} for signed builds.`);
       }
     }
   }
@@ -63,7 +181,7 @@ export async function build(opts: BuildOptions) {
     const b = await unwrap(
       lb.POST("/v1/orgs/{org}/projects/{project}/builds", {
         params: { path },
-        body: { platform, profile: profileName, environment: profile.environment, gitRef, message: opts.message, engine, distribution, ...(submit ? { submit: true, submitTrack } : {}) },
+        body: { platform, profile: profileName, environment: profile.environment, gitRef, message: opts.message, engine: engineFor(platform), distribution, ...(submit ? { submit: true, submitTrack } : {}) },
       }),
     );
     p.log.step(
@@ -73,7 +191,7 @@ export async function build(opts: BuildOptions) {
   }
   const summary = (b: Build) => ({ number: b.number, platform: b.platform, status: b.status, engine: b.engine, url: `${dashboardUrl()}/${config.org}/${config.project}/builds/${b.number}` });
   if (opts.wait === false) {
-    p.outro(`Queued. Follow along in the dashboard, or with ${pc.cyan("liftbay builds view <number>")}.`);
+    p.outro(`Queued. Follow along in the dashboard, or with ${pc.cyan(cmd("liftbay builds view <number>"))}.`);
     return { builds: started.map(summary) };
   }
 

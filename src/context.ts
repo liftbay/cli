@@ -43,7 +43,7 @@ export function client(): LiftbayClient {
 export class CliError extends Error {}
 
 export function fail(message: string): never {
-  throw new CliError(message);
+  throw new CliError(withCliName(message));
 }
 
 // ── JSON output (for scripts and AI agents) ─────────────────────────────
@@ -68,6 +68,16 @@ export const jsonMode = () => json;
 export function emit(result: unknown) {
   if (json) writeStdout!(`${JSON.stringify(result ?? { ok: true }, null, 2)}\n`);
 }
+
+/** How this CLI was started: `npx liftbay` (not installed) or `liftbay`, so the commands we suggest work as typed. */
+export const cliName = () =>
+  process.env.LIFTBAY_CLI_NAME ?? (/[\\/]_npx[\\/]/.test(process.argv[1] ?? "") || process.env.npm_command === "exec" ? "npx liftbay" : "liftbay");
+
+/** A suggested command, spelled the way this CLI was started: cmd("liftbay build") → "npx liftbay build". */
+export const cmd = (command: string) => command.replace(/^liftbay\b/, cliName());
+
+/** The same for commands quoted inside a message: `liftbay login` → `npx liftbay login`. */
+export const withCliName = (text: string) => (cliName() === "liftbay" ? text : text.replace(/`liftbay /g, `\`${cliName()} `));
 
 /** Turns API errors into one readable line; everything else is a bug and keeps its stack. */
 export function reportError(e: unknown): never {

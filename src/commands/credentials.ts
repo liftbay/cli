@@ -4,8 +4,9 @@ import * as p from "@clack/prompts";
 import { LiftbayApiError } from "@liftbay/sdk";
 import pc from "picocolors";
 import { AppleAuthError, AppleSession, type AppleTeam } from "../apple/index.ts";
-import { client, fail, isInteractive, needInteractive, unwrap } from "../context.ts";
+import { client, cmd, fail, isInteractive, needInteractive, unwrap } from "../context.ts";
 import { expoConfig, requireConfig } from "../project.ts";
+import { checkboxes } from "../prompts.ts";
 import { cancelled } from "./link.ts";
 
 export type IosCredentialOptions = {
@@ -160,7 +161,7 @@ export async function setUpIos(opts: IosCredentialOptions) {
   const bundleIds =
     opts.yes || !isInteractive() || detected.length === 1
       ? detected
-      : cancelled(await p.multiselect({ message: "Sign these bundle ids (the app and its extensions)", options: detected.map((id) => ({ value: id, label: id })), initialValues: detected, required: true }));
+      : cancelled(await checkboxes({ message: "Sign these bundle ids (the app and its extensions)", options: detected.map((id) => ({ value: id, label: id })), initialValues: detected }));
 
   // 3. Certificate and profiles: App Store, and ad hoc when asked for or when the team has test devices.
   const kinds: ("store" | "adhoc")[] = opts.adhoc ? ["adhoc"] : ["store"];
@@ -211,8 +212,8 @@ export async function credentialsIosCommand(opts: IosCredentialOptions & { signO
   const result = await setUpIos(opts);
   p.outro(
     opts.adhoc
-      ? `Internal iOS builds now install on your registered devices. Start one with ${pc.cyan("liftbay build --platform ios --profile preview")}`
-      : `iOS builds are now signed. Start one with ${pc.cyan("liftbay build --platform ios")}`,
+      ? `Internal iOS builds now install on your registered devices. Start one with ${pc.cyan(cmd("liftbay build --platform ios --profile preview"))}`
+      : `iOS builds are now signed. Start one with ${pc.cyan(cmd("liftbay build --platform ios"))}`,
   );
   return result;
 }
@@ -224,16 +225,16 @@ export async function credentialsCommand() {
   const apple = await unwrap(lb.GET("/v1/orgs/{org}/apple", { params: { path: { org: config.org } } }));
   const signing = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/signing", { params: { path: { org: config.org, project: config.project } } }));
   console.log(pc.bold("Apple"));
-  if (!apple.keys.length) console.log(`  No App Store Connect key. Run ${pc.cyan("liftbay credentials ios")}`);
+  if (!apple.keys.length) console.log(`  No App Store Connect key. Run ${pc.cyan(cmd("liftbay credentials ios"))}`);
   for (const k of apple.keys) console.log(`  Team ${k.teamName ?? ""} ${pc.dim(k.teamId)} · key ${k.keyId}`);
   for (const c of apple.certificates) console.log(`  Distribution certificate ${pc.dim(c.serialNumber)} · expires ${c.expiresAt.slice(0, 10)}`);
   console.log(pc.bold(`\n${config.project}`));
   const ios = (s: typeof signing.ios, none: string) =>
     s ? `${pc.green("ready")} · team ${s.teamId} · ${s.bundleIds.length || "?"} bundle id${s.bundleIds.length === 1 ? "" : "s"}${s.deviceCount !== null ? ` · ${s.deviceCount} devices` : ""}${s.expiresAt ? ` · expires ${s.expiresAt.slice(0, 10)}` : ""}` : none;
   console.log(`  iOS (App Store)    ${ios(signing.ios, pc.yellow("none: store builds are simulator builds"))}`);
-  console.log(`  iOS (ad hoc)       ${ios(signing.iosAdhoc, pc.dim(`none: run ${pc.cyan("liftbay credentials ios --adhoc")} for internal builds`))}`);
+  console.log(`  iOS (ad hoc)       ${ios(signing.iosAdhoc, pc.dim(`none: run ${pc.cyan(cmd("liftbay credentials ios --adhoc"))} for internal builds`))}`);
   console.log(
-    `  Android upload key ${signing.android ? `${pc.green("ready")} · alias ${signing.android.keyAlias} · ${signing.android.source}` : pc.dim(`created on the first Android build, or bring yours: ${pc.cyan("liftbay credentials android import")}`)}`,
+    `  Android upload key ${signing.android ? `${pc.green("ready")} · alias ${signing.android.keyAlias} · ${signing.android.source}` : pc.dim(`created on the first Android build, or bring yours: ${pc.cyan(cmd("liftbay credentials android import"))}`)}`,
   );
   const play = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/stores/google-play", { params: { path: { org: config.org, project: config.project } } }));
   console.log(`  Google Play        ${play ? `${pc.green("ready")} · ${play.clientEmail}` : pc.dim(`none (liftbay credentials android --play-key key.json)`)}`);
@@ -275,9 +276,9 @@ export async function credentialsAndroidImportCommand(opts: AndroidImportOptions
   } catch (e) {
     if (!(e instanceof LiftbayApiError) || e.status !== 409 || opts.replace) throw e;
     const warning = "This project already has an Android upload key. Replacing it means Play rejects uploads until you reset the upload key in Play Console (unless this is the same key).";
-    if (!interactive) fail(`${warning}\nExport a backup with ${pc.cyan("liftbay credentials android export")}, then pass --replace.`);
+    if (!interactive) fail(`${warning}\nExport a backup with ${pc.cyan(cmd("liftbay credentials android export"))}, then pass --replace.`);
     p.log.warn(warning);
-    if (!cancelled(await p.confirm({ message: "Replace the stored upload key?", initialValue: false }))) fail(`Kept the stored key. Back it up with ${pc.cyan("liftbay credentials android export")}.`);
+    if (!cancelled(await p.confirm({ message: "Replace the stored upload key?", initialValue: false }))) fail(`Kept the stored key. Back it up with ${pc.cyan(cmd("liftbay credentials android export"))}.`);
     status = await unwrap(lb.PUT("/v1/orgs/{org}/projects/{project}/signing/android", { params: { path }, body: { ...body, replace: true } }));
   }
   console.log(`${pc.green("✔")} Upload key imported (encrypted) · alias ${status.android?.keyAlias ?? keyAlias}`);

@@ -8,6 +8,8 @@ import { fail } from "./context.ts";
 
 export const CONFIG_FILE = "liftbay.json";
 
+export type IosEngine = "github-actions" | "xcode-cloud";
+
 export type BuildProfile = {
   environment: string;
   channel: string;
@@ -28,6 +30,8 @@ export type LiftbayConfig = {
     profiles: Record<string, BuildProfile>;
     /** Builds started by git events through the GitHub App. See https://liftbay.dev/docs/builds/triggers */
     triggers?: { on: "push" | "pull_request" | "tag"; branches?: string[]; tags?: string[]; profile: string; platforms?: ("ios" | "android")[]; submit?: boolean }[];
+    /** Where iOS builds run unless `--engine` says otherwise: GitHub Actions macOS runners, or the team's Xcode Cloud. */
+    iosEngine?: IosEngine;
   };
   updates?: { client: "expo-updates"; runtimeVersion: { policy: "appVersion" | "fingerprint" } };
 };
@@ -127,6 +131,33 @@ export async function run(cmd: string, args: string[], cwd = process.cwd(), env:
     child.on("close", resolve);
   });
   if (code !== 0) fail(`\`${cmd} ${args.join(" ")}\` failed (exit ${code})`);
+}
+
+/**
+ * Runs a setup step (an install, a codemod) without flooding the terminal: its output is kept, and shown only
+ * if it fails. npm's audit and funding notes are about the app's whole dependency tree, not this step.
+ */
+export async function runQuiet(label: string, cmd: string, args: string[], cwd = process.cwd()) {
+  const p = await import("@clack/prompts");
+  const spin = p.spinner();
+  spin.start(label);
+  const lines: string[] = [];
+  const code = await new Promise<number | null>((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, npm_config_audit: "false", npm_config_fund: "false", npm_config_update_notifier: "false" },
+    });
+    const keep = (chunk: Buffer) => lines.push(...chunk.toString().split(/\r?\n/).filter(Boolean));
+    child.stdout.on("data", keep);
+    child.stderr.on("data", keep);
+    child.on("error", reject);
+    child.on("close", resolve);
+  });
+  if (code === 0) return spin.stop(label.replace(/^Installing/, "Installed").replace(/^Setting up/, "Set up"));
+  spin.error(`${label} failed`);
+  console.error(lines.slice(-40).join("\n"));
+  fail(`\`${cmd} ${args.join(" ")}\` failed (exit ${code})`);
 }
 
 export function readAppJson(cwd = process.cwd()): any {

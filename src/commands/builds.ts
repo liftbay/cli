@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import pc from "picocolors";
-import { client, dashboardUrl, fail, jsonMode, unwrap } from "../context.ts";
+import { client, cmd, dashboardUrl, fail, jsonMode, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
 
 const FINISHED = new Set(["succeeded", "failed", "cancelled"]);
@@ -35,7 +35,7 @@ export async function buildsList(opts: { platform?: string; status?: string; lim
     client().GET("/v1/orgs/{org}/projects/{project}/builds", { params: { path, query: { platform: opts.platform as "ios" | "android" | undefined, status } } }),
   );
   const builds = all.slice(0, limit);
-  if (!builds.length) console.log(`No builds yet. Start one with ${pc.cyan("liftbay build")}`);
+  if (!builds.length) console.log(`No builds yet. Start one with ${pc.cyan(cmd("liftbay build"))}`);
   for (const b of builds) {
     console.log(
       `${pc.bold(`#${b.number}`.padEnd(6))} ${b.platform.padEnd(8)} ${statusColor(b.status).padEnd(20)} ${b.profile.padEnd(12)} ${b.gitRef.padEnd(20)} ${pc.dim(`${duration(b.durationSec).padEnd(8)} ${b.message ?? ""}`)}`,
@@ -143,7 +143,7 @@ export async function submissionsList(opts: { limit?: string }) {
   const { config, path } = project();
   const all = await unwrap(client().GET("/v1/orgs/{org}/projects/{project}/submissions", { params: { path } }));
   const list = all.slice(0, Number(opts.limit ?? 20));
-  if (!list.length) console.log(`No submissions yet. Submit a store build with ${pc.cyan("liftbay submit")}`);
+  if (!list.length) console.log(`No submissions yet. Submit a store build with ${pc.cyan(cmd("liftbay submit"))}`);
   for (const s of list) {
     const target = s.target === "testflight" ? "TestFlight" : `Play ${s.target}`;
     console.log(`${pc.bold(`#${s.buildNumber}`.padEnd(6))} ${s.platform.padEnd(8)} ${target.padEnd(16)} ${statusColor(s.status).padEnd(20)} ${pc.dim(s.message ?? "")} ${pc.dim(s.id)}`);

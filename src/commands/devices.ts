@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import QRCode from "qrcode";
-import { client, fail, isInteractive, unwrap } from "../context.ts";
+import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
 import { cancelled } from "./link.ts";
 
@@ -12,7 +12,7 @@ async function nextStep(lb: ReturnType<typeof client>) {
   const config = requireConfig();
   const signing = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/signing", { params: { path: { org: config.org, project: config.project } } }));
   if (signing.iosAdhoc) p.log.info("The next internal iOS build re-creates the ad hoc profiles with this device.");
-  else p.log.info(`Set up ad hoc signing to build for it: ${pc.cyan("liftbay credentials ios --adhoc")}`);
+  else p.log.info(`Set up ad hoc signing to build for it: ${pc.cyan(cmd("liftbay credentials ios --adhoc"))}`);
 }
 
 /**
@@ -39,7 +39,7 @@ export async function deviceAdd(opts: { udid?: string; name?: string; teamId?: s
   p.note(`${qr}\n${reg.url}`, "Scan with the iPhone's camera, or open the link in Safari on it");
   p.log.info(pc.dim("On the device: Download profile → Allow, then Settings → Profile Downloaded → Install. The link works for one hour."));
   if (opts.wait === false) {
-    p.outro(`Check with ${pc.cyan("liftbay device list")} once it's installed on the device.`);
+    p.outro(`Check with ${pc.cyan(cmd("liftbay device list"))} once it's installed on the device.`);
     return { registration: { id: reg.id, url: reg.url, expiresAt: reg.expiresAt }, next: "Open the url on the iPhone or iPad, install the profile, then check `liftbay device list`" };
   }
 
@@ -63,7 +63,7 @@ export async function deviceAdd(opts: { udid?: string; name?: string; teamId?: s
 export async function deviceList() {
   const config = requireConfig();
   const devices = await unwrap(client().GET("/v1/orgs/{org}/devices", { params: { path: { org: config.org } } }));
-  if (!devices.length) console.log(`No devices yet. Add one with ${pc.cyan("liftbay device add")}`);
+  if (!devices.length) console.log(`No devices yet. Add one with ${pc.cyan(cmd("liftbay device add"))}`);
   for (const d of devices) {
     const state = !d.enabled ? pc.dim("disabled") : d.registeredAtApple ? pc.green("registered") : pc.yellow("pending Apple");
     console.log(`${d.name.padEnd(28)} ${pc.dim(d.udid.padEnd(42))} ${(d.model ?? "").padEnd(12)} ${state.padEnd(22)} ${pc.dim(d.id)}`);

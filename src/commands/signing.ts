@@ -4,7 +4,7 @@ import { dirname, relative } from "node:path";
 import * as p from "@clack/prompts";
 import forge from "node-forge";
 import pc from "picocolors";
-import { client, fail, isInteractive, unwrap } from "../context.ts";
+import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
 import { readAppJson, requireConfig, writeAppJson } from "../project.ts";
 import { cancelled } from "./link.ts";
 
@@ -132,7 +132,7 @@ export async function signingInit(opts: { privateKey?: string; certificate?: str
   p.note(
     [
       `1. Rebuild your apps once: the certificate is part of the binary.`,
-      `2. ${pc.cyan("liftbay update publish")} signs automatically with ${privateKeyPath}.`,
+      `2. ${pc.cyan(cmd("liftbay update publish"))} signs automatically with ${privateKeyPath}.`,
       `3. In CI, store the private key as a secret named ${pc.cyan("LIFTBAY_UPDATE_PRIVATE_KEY")}.`,
       `4. Back the key up somewhere safe. If it's lost, apps need a rebuild with a new certificate.`,
       ``,

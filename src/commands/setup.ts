@@ -3,13 +3,15 @@ import { dirname } from "node:path";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { WORKFLOW_YAML } from "../generated/workflow.ts";
-import { client, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
-import { detectApp, output, readAppJson, run, writeAppJson, writeConfig, type BuildProfile, type DetectedApp, type LiftbayConfig } from "../project.ts";
+import { CliError, client, cmd, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
+import { checkboxes } from "../prompts.ts";
+import { ensureGithub, type GithubCheck } from "./github.ts";
+import { detectApp, output, readAppJson, runQuiet, writeAppJson, writeConfig, type BuildProfile, type DetectedApp, type IosEngine, type LiftbayConfig } from "../project.ts";
 import { ensureSignedIn } from "./auth.ts";
 import { ensureEnvironment, importVariables, printImport, readEasProfiles, type ImportResult } from "./env.ts";
 import { cancelled, ensureLinked, type LinkOptions } from "./link.ts";
 
-export type SetupOptions = LinkOptions & { platforms?: string; runtimePolicy?: "appVersion" | "fingerprint"; apiUrl?: string; dashboardUrl?: string; eas?: boolean };
+export type SetupOptions = LinkOptions & { platforms?: string; iosEngine?: string; runtimePolicy?: "appVersion" | "fingerprint"; apiUrl?: string; dashboardUrl?: string; eas?: boolean };
 
 const DEFAULT_PROFILES: Record<string, Omit<BuildProfile, "platforms">> = {
   development: { environment: "development", channel: "development", distribution: "internal" },
@@ -35,16 +37,35 @@ export async function ciInit(app: DetectedApp, config: LiftbayConfig, opts: Setu
       opts.yes || !isInteractive()
         ? ["ios", "android"]
         : cancelled(
-            await p.multiselect({
+            await checkboxes({
               message: "Platforms to build",
               options: [
-                { value: "ios" as const, label: "iOS", hint: "builds run on your GitHub Actions macOS runners" },
-                { value: "android" as const, label: "Android", hint: "builds run on your GitHub Actions Linux runners" },
+                { value: "ios" as const, label: "iOS", hint: "on GitHub Actions macOS runners or your Xcode Cloud" },
+                { value: "android" as const, label: "Android", hint: "on GitHub Actions Linux runners" },
               ],
               initialValues: ["ios", "android"] as ("ios" | "android")[],
-              required: true,
             }),
           );
+  }
+
+  // Where iOS builds run. Both use the customer's own minutes or hours; Xcode Cloud needs a one-time setup.
+  let iosEngine: IosEngine | undefined = opts.iosEngine as IosEngine | undefined;
+  if (iosEngine && iosEngine !== "github-actions" && iosEngine !== "xcode-cloud") fail("--ios-engine must be github-actions or xcode-cloud");
+  if (platforms.includes("ios") && !iosEngine) {
+    iosEngine =
+      config.build?.iosEngine ??
+      (opts.yes || !isInteractive()
+        ? "github-actions"
+        : cancelled(
+            await p.select({
+              message: "Where should iOS builds run?",
+              options: [
+                { value: "github-actions" as const, label: "GitHub Actions", hint: "macOS runners on your GitHub minutes; ready now" },
+                { value: "xcode-cloud" as const, label: "Xcode Cloud", hint: "store builds, 25 free hours a month with the Apple Developer Program; one-time setup after iOS signing" },
+              ],
+              initialValue: "github-actions" as const,
+            }),
+          ));
   }
 
   if (platforms.includes("ios") && !app.bundleId) p.log.warn(`No iOS bundle identifier found. Set ${pc.cyan("expo.ios.bundleIdentifier")} in app.json before the first iOS build.`);
@@ -53,7 +74,7 @@ export async function ciInit(app: DetectedApp, config: LiftbayConfig, opts: Setu
   // Keep the project's identifiers and repo in sync with the app.
   const path = { org: config.org, project: config.project };
   const repo = await githubRepo();
-  if (!repo) p.log.warn(`No GitHub remote found. Builds run on GitHub Actions: push this app to GitHub, then run ${pc.cyan("liftbay ci init")} again.`);
+  if (!repo) p.log.warn(`No GitHub remote found. Builds run on GitHub Actions: push this app to GitHub, then run ${pc.cyan(cmd("liftbay ci init"))} again.`);
   await unwrap(
     lb.PATCH("/v1/orgs/{org}/projects/{project}", {
       params: { path },
@@ -91,21 +112,44 @@ export async function ciInit(app: DetectedApp, config: LiftbayConfig, opts: Setu
       imported.push(r);
     }
     p.log.info(pc.dim("EXPO_PUBLIC_* values are plain (they're in the app bundle); names like *_TOKEN or *_SECRET are secret; the rest sensitive."));
-    p.log.info(pc.dim(`Variables kept on expo.dev (EAS environment variables) aren't in eas.json: ${pc.cyan("npx eas env:pull --environment production")}, then ${pc.cyan("liftbay env import .env.local --environment production")}.`));
+    p.log.info(pc.dim(`Variables kept on expo.dev (EAS environment variables) aren't in eas.json: ${pc.cyan("npx eas env:pull --environment production")}, then ${pc.cyan(cmd("liftbay env import .env.local --environment production"))}.`));
   }
 
   const profiles = Object.fromEntries(Object.entries(base).map(([name, prof]) => [name, { ...prof, platforms }]));
   // Triggers are opt-in (docs: /docs/builds/triggers); keep any the project already has.
-  const next = { ...config, build: { profiles, triggers: config.build?.triggers ?? [] } };
+  const next: LiftbayConfig = { ...config, build: { profiles, triggers: config.build?.triggers ?? [], ...(iosEngine ? { iosEngine } : {}) } };
   writeConfig(next);
   p.note(
     Object.entries(profiles)
       .map(([name, prof]) => `${pc.bold(name.padEnd(12))} env ${prof.environment.padEnd(12)} ${prof.distribution === "store" ? "store" : "internal"} · ${prof.platforms.join(", ")}`)
-      .join("\n"),
+      .join("\n") + (iosEngine ? `\n\niOS builds run on ${iosEngine === "xcode-cloud" ? "Xcode Cloud" : "GitHub Actions"}` : ""),
     "Build profiles",
   );
+  if (iosEngine === "xcode-cloud") {
+    p.log.info(
+      `Xcode Cloud makes iOS store builds (TestFlight); internal and simulator builds stay on GitHub Actions. It needs iOS signing first: ${pc.cyan(cmd("liftbay credentials ios"))}, then ${pc.cyan(cmd("liftbay xcode-cloud connect"))}.`,
+    );
+  }
   lastImport = imported;
   return next;
+}
+
+/**
+ * Builds start through the Liftbay GitHub App with the workflow on the default branch. In a terminal this
+ * walks through installing both now; a "no" (or an agent) just gets told what's left, and setup carries on.
+ */
+async function githubStep(): Promise<GithubCheck | { error: string }> {
+  try {
+    const s = await ensureGithub({ needWorkflow: true, soft: !isInteractive() });
+    if (s.connected && s.workflow === "present") p.log.success(`GitHub is ready: ${s.repo}`);
+    else if (!isInteractive()) p.log.warn(`GitHub isn't ready yet${s.installUrl ? `: install the Liftbay GitHub App ${s.installUrl}` : ""}. ${cmd("liftbay github status")} shows what's left.`);
+    return s;
+  } catch (e) {
+    if (!(e instanceof CliError)) throw e;
+    p.log.warn(e.message);
+    p.log.info(`Finish any time with ${pc.cyan(cmd("liftbay github connect"))}; ${cmd("liftbay build")} checks it too.`);
+    return { error: e.message };
+  }
 }
 
 /** What the last ciInit imported from eas.json, for the commands' JSON results. */
@@ -141,9 +185,9 @@ async function writeWorkflow(opts: SetupOptions) {
 
 const pluginSpec = () => process.env.LIFTBAY_EXPO_PLUGIN_SPEC ?? "@liftbay/expo-plugin";
 
-async function addDependency(app: DetectedApp, spec: string) {
+async function addDependency(app: DetectedApp, spec: string, label: string) {
   const args = { npm: ["install", spec], yarn: ["add", spec], pnpm: ["add", spec], bun: ["add", spec] }[app.packageManager];
-  await run(app.packageManager, args);
+  await runQuiet(label, app.packageManager, args);
 }
 
 /** expo-updates, the Liftbay config plugin, channels per build profile and the runtime version policy. */
@@ -157,14 +201,10 @@ export async function otaInit(app: DetectedApp, config: LiftbayConfig, opts: Set
       (isInteractive() &&
         cancelled(await p.confirm({ message: "OTA updates use expo-updates, which needs Expo Modules in a bare React Native app. Install them now (npx install-expo-modules)?" })));
     if (!ok) fail("OTA setup needs Expo Modules. Run `npx install-expo-modules@latest`, then `liftbay ota init`.");
-    await run("npx", ["install-expo-modules@latest"]);
+    await runQuiet("Setting up Expo Modules", "npx", ["--yes", "install-expo-modules@latest"]);
   }
-  if (!app.hasExpoUpdates) {
-    p.log.step("Installing expo-updates");
-    await run("npx", ["expo", "install", "expo-updates"]);
-  }
-  p.log.step("Installing the Liftbay config plugin");
-  await addDependency(app, pluginSpec());
+  if (!app.hasExpoUpdates) await runQuiet("Installing expo-updates", "npx", ["expo", "install", "expo-updates"]);
+  await addDependency(app, pluginSpec(), "Installing the Liftbay config plugin (@liftbay/expo-plugin)");
 
   const existingPolicy = readAppJson()?.expo?.runtimeVersion?.policy;
   let policy = opts.runtimePolicy ?? (existingPolicy === "appVersion" || existingPolicy === "fingerprint" ? existingPolicy : undefined);
@@ -235,8 +275,9 @@ export async function ciInitCommand(opts: SetupOptions) {
   const app = await detectApp();
   const config = await ensureLinked(app, opts);
   const next = await ciInit(app, config, opts);
-  p.outro(`Builds are configured. Start one with ${pc.cyan("liftbay build --profile preview")}`);
-  return { config: next, imported: lastImport };
+  const github = await githubStep();
+  p.outro(`Builds are configured. Start one with ${pc.cyan(cmd("liftbay build"))}`);
+  return { config: next, imported: lastImport, github };
 }
 
 export async function otaInitCommand(opts: SetupOptions) {
@@ -250,7 +291,7 @@ export async function otaInitCommand(opts: SetupOptions) {
 }
 
 const nextStepsOta = () =>
-  `OTA updates are configured.\n\n  1. Build a new binary once (the update URL and channel are baked in)\n  2. Ship JS changes with ${pc.cyan("liftbay update publish --channel production")}`;
+  `OTA updates are configured.\n\n  1. Build a new binary once (the update URL and channel are baked in)\n  2. Ship JS changes with ${pc.cyan(cmd("liftbay update publish --channel production"))}`;
 
 /** The wizard: sign in, link the project, set up builds, then OTA updates. */
 export async function initCommand(opts: SetupOptions & { ota?: boolean }) {
@@ -262,18 +303,30 @@ export async function initCommand(opts: SetupOptions & { ota?: boolean }) {
   );
   let config = await ensureLinked(app, opts);
 
-  p.log.step(pc.bold("1/2  Builds"));
+  p.log.step(pc.bold("1/3  Builds"));
   config = await ciInit(app, config, opts);
 
-  p.log.step(pc.bold("2/2  OTA updates"));
+  p.log.step(pc.bold("2/3  OTA updates"));
   const wantOta = opts.ota ?? (opts.yes || !isInteractive() ? true : cancelled(await p.confirm({ message: "Set up over-the-air updates with expo-updates?", initialValue: true })));
   if (wantOta) config = await otaInit(await detectApp(), config, opts);
-  else p.log.info(`Skipped. Run ${pc.cyan("liftbay ota init")} any time.`);
+  else p.log.info(`Skipped. Run ${pc.cyan(cmd("liftbay ota init"))} any time.`);
+
+  p.log.step(pc.bold("3/3  GitHub"));
+  const github = await githubStep();
 
   p.outro(
-    `Done. ${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}`)}\n\n  Build:  ${pc.cyan("liftbay build --profile preview")}${wantOta ? `\n  Update: ${pc.cyan("liftbay update publish --channel production")}` : ""}`,
+    [
+      `Done. ${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}`)}`,
+      "",
+      "  Next:",
+      `  1. Commit liftbay.json, .github/workflows/liftbay.yml, app.json and package.json, and push this branch`,
+      `  2. Build:   ${pc.cyan(cmd("liftbay build"))}`,
+      ...(wantOta ? [`  3. Update:  ${pc.cyan(cmd("liftbay update publish --channel preview"))} ${pc.dim("(after a build from this setup is installed)")}`] : []),
+      ...(cmd("liftbay") !== "liftbay" ? ["", pc.dim(`  Tip: ${pc.cyan("npm i -g liftbay")} to type ${pc.cyan("liftbay")} instead of ${pc.cyan("npx liftbay")}.`)] : []),
+    ].join("\n"),
   );
   return {
+    github,
     config,
     imported: lastImport,
     url: `${dashboardUrl()}/${config.org}/${config.project}`,

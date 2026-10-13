@@ -11,10 +11,11 @@ import { ciInitCommand, initCommand, otaInitCommand } from "./commands/setup.ts"
 import { channels, list, publish, rollback, rollout } from "./commands/update.ts";
 import { signingInit } from "./commands/signing.ts";
 import { envExport, envImport, envList, envSet, envUnset } from "./commands/env.ts";
+import { githubConnect, githubStatus, githubWorkflow } from "./commands/github.ts";
 
 const program = new Command("liftbay")
   .description("Build, ship and update React Native apps")
-  .version("0.3.1")
+  .version("0.4.0")
   .option("--json", "print the result as JSON on stdout (progress goes to stderr; never prompts). Also LIFTBAY_JSON=1")
   .hook("preAction", () => {
     if (program.opts().json || process.env.LIFTBAY_JSON === "1") enableJson();
@@ -35,6 +36,7 @@ const setupOptions = (cmd: Command) =>
     .option("--project <slug>", "project slug (created if it doesn't exist)")
     .option("--platforms <list>", "ios, android or all")
     .option("--runtime-policy <policy>", "appVersion or fingerprint")
+    .option("--ios-engine <engine>", "where iOS builds run: github-actions or xcode-cloud")
     .option("--no-eas", "don't use eas.json's build profiles and env, even if there is one")
     .option("-y, --yes", "accept defaults, no prompts")
     .option("--api-url <url>", "API URL (for self-hosted or local development)")
@@ -59,15 +61,15 @@ setupOptions(ci.command("init").description("Set up build profiles, environments
 program
   .command("build")
   .description("Build on your GitHub Actions (Android on Linux, iOS on macOS) and follow the logs")
-  .option("--platform <platform>", "ios, android or all (default: the profile's platforms)")
-  .option("--profile <name>", "build profile from liftbay.json", "production")
+  .option("--platform <platform>", "ios, android or all (asked in a terminal; otherwise the profile's platforms)")
+  .option("--profile <name>", "build profile from liftbay.json (asked in a terminal; otherwise production)")
   .option("--ref <ref>", "branch, tag or commit to build (default: current branch)")
   .option("-m, --message <text>", "build message")
   .option("--simulator", "iOS: build for the simulator instead of a signed .ipa")
   .option("--no-wait", "queue and exit without following the logs")
   .option("--submit", "submit store builds when they succeed: TestFlight, or a Google Play track")
   .option("--track <track>", "Play track for --submit: internal, alpha, beta or production")
-  .option("--engine <engine>", "auto (default), github-actions or xcode-cloud")
+  .option("--engine <engine>", "where iOS builds run: github-actions or xcode-cloud (default: build.iosEngine in liftbay.json; asked in a terminal)")
   .action(wrap(build));
 
 const builds = program.command("builds").description("Look at builds: list, status, logs, artifacts");
@@ -107,6 +109,19 @@ program
   .option("--rollout <percent>", "Play: staged rollout percentage")
   .option("--no-wait", "queue and exit without following progress")
   .action(wrap(submit));
+
+const github = program.command("github").description("The Liftbay GitHub App and the build workflow");
+github.command("status").description("Is the repository linked, the GitHub App installed, and the workflow on the default branch?").action(wrap(githubStatus));
+github
+  .command("connect")
+  .description("Install the Liftbay GitHub App: opens GitHub and waits (--no-wait, or an agent: prints the link)")
+  .option("--no-wait", "print the install link and exit")
+  .action(wrap(githubConnect));
+github
+  .command("workflow")
+  .description("Open a pull request that adds the build workflow to the default branch (GitHub only starts workflows that are there)")
+  .option("--no-wait", "open the pull request and exit instead of waiting for the merge")
+  .action(wrap(githubWorkflow));
 
 const xcodeCloud = program.command("xcode-cloud").description("Run iOS store builds on your own Xcode Cloud");
 xcodeCloud
