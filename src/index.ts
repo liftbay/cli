@@ -10,10 +10,11 @@ import { deviceAdd, deviceList, deviceRemove } from "./commands/devices.ts";
 import { ciInitCommand, initCommand, otaInitCommand } from "./commands/setup.ts";
 import { channels, list, publish, rollback, rollout } from "./commands/update.ts";
 import { signingInit } from "./commands/signing.ts";
+import { envExport, envImport, envList, envSet, envUnset } from "./commands/env.ts";
 
 const program = new Command("liftbay")
   .description("Build, ship and update React Native apps")
-  .version("0.2.0")
+  .version("0.3.0")
   .option("--json", "print the result as JSON on stdout (progress goes to stderr; never prompts). Also LIFTBAY_JSON=1")
   .hook("preAction", () => {
     if (program.opts().json || process.env.LIFTBAY_JSON === "1") enableJson();
@@ -34,6 +35,7 @@ const setupOptions = (cmd: Command) =>
     .option("--project <slug>", "project slug (created if it doesn't exist)")
     .option("--platforms <list>", "ios, android or all")
     .option("--runtime-policy <policy>", "appVersion or fingerprint")
+    .option("--no-eas", "don't use eas.json's build profiles and env, even if there is one")
     .option("-y, --yes", "accept defaults, no prompts")
     .option("--api-url <url>", "API URL (for self-hosted or local development)")
     .option("--dashboard-url <url>", "dashboard URL");
@@ -167,6 +169,34 @@ device
   .action(wrap(deviceAdd));
 device.command("list").description("List registered devices").action(wrap(deviceList));
 device.command("remove <id>").description("Remove a device (disabled at Apple)").action(wrap(deviceRemove));
+
+const env = program.command("env").description("Environment variables of the project's environments (development, preview, production, …)");
+env
+  .command("list")
+  .description("Environments, or with --environment its variables (sensitive values masked, secrets never shown)")
+  .option("-e, --environment <slug>", "environment")
+  .action(wrap(envList));
+env
+  .command("import <files...>")
+  .description("Import .env files (into the environment each is named for, e.g. .env.production, or --environment), or eas.json (every build profile's env)")
+  .option("-e, --environment <slug>", "environment (for eas.json: only that profile)")
+  .option("--visibility <visibility>", "plain, sensitive or secret for all keys (default: EXPO_PUBLIC_* plain, *_TOKEN/*_SECRET/… secret, the rest sensitive)")
+  .option("--no-overwrite", "keep values that are already set")
+  .action(wrap(envImport));
+env
+  .command("set <pairs...>")
+  .description("Set KEY=value pairs (values end up in shell history: prefer `env import` for secrets)")
+  .option("-e, --environment <slug>", "environment")
+  .option("--visibility <visibility>", "plain, sensitive or secret (default: from the name)")
+  .action(wrap(envSet));
+env.command("unset <keys...>").description("Remove variables").option("-e, --environment <slug>", "environment").action(wrap(envUnset));
+env
+  .command("export")
+  .description("Print an environment as a .env file, or write it with --out (secret values are never exported)")
+  .option("-e, --environment <slug>", "environment")
+  .option("--out <file>", "file to write")
+  .option("--force", "overwrite the file")
+  .action(wrap(envExport));
 
 const ota = program.command("ota").description("Over-the-air updates");
 setupOptions(ota.command("init").description("Set up expo-updates, the Liftbay plugin and channels")).action(wrap(otaInitCommand));

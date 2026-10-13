@@ -31,6 +31,7 @@ It's published at [liftbay/skills](https://github.com/liftbay/skills), and ships
 | `builds list`, `builds view`, `builds logs`, `builds download`, `builds cancel` | Look at builds and their artifacts |
 | `submit`, `submissions list`, `submissions view` | TestFlight and Google Play uploads |
 | `device add`, `device list`, `device remove` | iOS test devices for ad hoc builds |
+| `env list`, `env import`, `env set`, `env unset`, `env export` | Environment variables; `env import` reads `.env` files and `eas.json` |
 | `credentials`, `credentials ios` | Show signing; set up iOS signing with your Apple ID or a `.p8` key |
 | `update publish`, `update list`, `update rollout`, `update rollback` | Over-the-air updates |
 | `channels` | List update channels |

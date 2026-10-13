@@ -6,9 +6,10 @@ import { WORKFLOW_YAML } from "../generated/workflow.ts";
 import { client, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
 import { detectApp, output, readAppJson, run, writeAppJson, writeConfig, type BuildProfile, type DetectedApp, type LiftbayConfig } from "../project.ts";
 import { ensureSignedIn } from "./auth.ts";
+import { ensureEnvironment, importVariables, printImport, readEasProfiles, type ImportResult } from "./env.ts";
 import { cancelled, ensureLinked, type LinkOptions } from "./link.ts";
 
-export type SetupOptions = LinkOptions & { platforms?: string; runtimePolicy?: "appVersion" | "fingerprint"; apiUrl?: string; dashboardUrl?: string };
+export type SetupOptions = LinkOptions & { platforms?: string; runtimePolicy?: "appVersion" | "fingerprint"; apiUrl?: string; dashboardUrl?: string; eas?: boolean };
 
 const DEFAULT_PROFILES: Record<string, Omit<BuildProfile, "platforms">> = {
   development: { environment: "development", channel: "development", distribution: "internal" },
@@ -61,14 +62,39 @@ export async function ciInit(app: DetectedApp, config: LiftbayConfig, opts: Setu
   );
   await writeWorkflow(opts);
 
+  // Coming from EAS: eas.json's build profiles, channels and env become Liftbay's (env goes into environments).
+  const eas = opts.eas === false ? null : readEasProfiles();
+  let fromEas = false;
+  if (eas?.length) {
+    fromEas =
+      opts.yes ||
+      !isInteractive() ||
+      cancelled(await p.confirm({ message: `Found eas.json (profiles ${eas.map((e) => e.name).join(", ")}). Use its build profiles, channels and env variables?`, initialValue: true }));
+  }
+  const base: Record<string, Omit<BuildProfile, "platforms">> = fromEas
+    ? Object.fromEntries(eas!.map((e) => [e.name, { environment: e.slug, channel: e.channel, distribution: e.distribution }]))
+    : DEFAULT_PROFILES;
+
   const envs = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/environments", { params: { path } }));
-  for (const profile of Object.values(DEFAULT_PROFILES)) {
-    if (!envs.some((e) => e.slug === profile.environment)) {
-      await unwrap(lb.POST("/v1/orgs/{org}/projects/{project}/environments", { params: { path }, body: { name: profile.environment, slug: profile.environment } }));
+  for (const profile of Object.values(base)) {
+    if (await ensureEnvironment(lb, path, profile.environment, envs)) envs.push({ slug: profile.environment } as (typeof envs)[number]);
+  }
+  const imported: ImportResult[] = [];
+  if (fromEas) {
+    p.log.step("Importing env variables from eas.json");
+    for (const e of eas!) {
+      const vars = Object.entries(e.env).map(([key, value]) => ({ key, value }));
+      if (!vars.length) continue;
+      // Re-running init keeps values changed in Liftbay since; `liftbay env import eas.json` overwrites.
+      const r = await importVariables(lb, path, e.slug, vars, { overwrite: false });
+      printImport(r);
+      imported.push(r);
     }
+    p.log.info(pc.dim("EXPO_PUBLIC_* values are plain (they're in the app bundle); names like *_TOKEN or *_SECRET are secret; the rest sensitive."));
+    p.log.info(pc.dim(`Variables kept on expo.dev (EAS environment variables) aren't in eas.json: ${pc.cyan("npx eas env:pull --environment production")}, then ${pc.cyan("liftbay env import .env.local --environment production")}.`));
   }
 
-  const profiles = Object.fromEntries(Object.entries(DEFAULT_PROFILES).map(([name, prof]) => [name, { ...prof, platforms }]));
+  const profiles = Object.fromEntries(Object.entries(base).map(([name, prof]) => [name, { ...prof, platforms }]));
   // Triggers are opt-in (docs: /docs/builds/triggers); keep any the project already has.
   const next = { ...config, build: { profiles, triggers: config.build?.triggers ?? [] } };
   writeConfig(next);
@@ -78,8 +104,12 @@ export async function ciInit(app: DetectedApp, config: LiftbayConfig, opts: Setu
       .join("\n"),
     "Build profiles",
   );
+  lastImport = imported;
   return next;
 }
+
+/** What the last ciInit imported from eas.json, for the commands' JSON results. */
+let lastImport: ImportResult[] = [];
 
 const WORKFLOW_PATH = ".github/workflows/liftbay.yml";
 
@@ -136,7 +166,8 @@ export async function otaInit(app: DetectedApp, config: LiftbayConfig, opts: Set
   p.log.step("Installing the Liftbay config plugin");
   await addDependency(app, pluginSpec());
 
-  let policy = opts.runtimePolicy;
+  const existingPolicy = readAppJson()?.expo?.runtimeVersion?.policy;
+  let policy = opts.runtimePolicy ?? (existingPolicy === "appVersion" || existingPolicy === "fingerprint" ? existingPolicy : undefined);
   if (!policy) {
     policy =
       opts.yes || !isInteractive()
@@ -205,7 +236,7 @@ export async function ciInitCommand(opts: SetupOptions) {
   const config = await ensureLinked(app, opts);
   const next = await ciInit(app, config, opts);
   p.outro(`Builds are configured. Start one with ${pc.cyan("liftbay build --profile preview")}`);
-  return { config: next };
+  return { config: next, imported: lastImport };
 }
 
 export async function otaInitCommand(opts: SetupOptions) {
@@ -244,6 +275,7 @@ export async function initCommand(opts: SetupOptions & { ota?: boolean }) {
   );
   return {
     config,
+    imported: lastImport,
     url: `${dashboardUrl()}/${config.org}/${config.project}`,
     next: ["Commit liftbay.json, .github/workflows/liftbay.yml and app.json, and push", "liftbay build --profile preview", ...(wantOta ? ["liftbay update publish --channel production"] : [])],
   };
