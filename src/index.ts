@@ -1,7 +1,8 @@
 import { Command } from "commander";
-import { reportError } from "./context.ts";
+import { emit, enableJson, reportError } from "./context.ts";
 import { login, logout, whoami } from "./commands/auth.ts";
 import { build } from "./commands/build.ts";
+import { buildsCancel, buildsDownload, buildsList, buildsLogs, buildsView, submissionsList, submissionsView } from "./commands/builds.ts";
 import { xcodeCloudConnect, xcodeCloudDisconnect, xcodeCloudStatus } from "./commands/xcode-cloud.ts";
 import { credentialsAndroidExportCommand, credentialsAndroidImportCommand, credentialsCommand, credentialsIosCommand } from "./commands/credentials.ts";
 import { credentialsAndroidCommand, submit } from "./commands/submit.ts";
@@ -10,12 +11,18 @@ import { ciInitCommand, initCommand, otaInitCommand } from "./commands/setup.ts"
 import { channels, list, publish, rollback, rollout } from "./commands/update.ts";
 import { signingInit } from "./commands/signing.ts";
 
-const program = new Command("liftbay").description("Build, ship and update React Native apps").version("0.1.1");
+const program = new Command("liftbay")
+  .description("Build, ship and update React Native apps")
+  .version("0.2.0")
+  .option("--json", "print the result as JSON on stdout (progress goes to stderr; never prompts). Also LIFTBAY_JSON=1")
+  .hook("preAction", () => {
+    if (program.opts().json || process.env.LIFTBAY_JSON === "1") enableJson();
+  });
 const wrap =
   <A extends unknown[]>(fn: (...args: A) => Promise<unknown>) =>
   async (...args: A): Promise<void> => {
     try {
-      await fn(...args);
+      emit(await fn(...args));
     } catch (e) {
       reportError(e);
     }
@@ -37,6 +44,7 @@ program
   .option("--api-url <url>", "API URL")
   .option("--dashboard-url <url>", "dashboard URL")
   .option("--no-open", "don't open the browser")
+  .option("--no-wait", "start the sign-in and exit; run `liftbay login` again after approving to finish (for agents)")
   .action(wrap(login));
 program.command("logout").description("Sign out and remove the saved token").action(wrap(logout));
 program.command("whoami").description("Show the signed-in user and organizations").action(wrap(whoami));
@@ -59,6 +67,33 @@ program
   .option("--track <track>", "Play track for --submit: internal, alpha, beta or production")
   .option("--engine <engine>", "auto (default), github-actions or xcode-cloud")
   .action(wrap(build));
+
+const builds = program.command("builds").description("Look at builds: list, status, logs, artifacts");
+builds
+  .command("list")
+  .description("Recent builds, newest first")
+  .option("--platform <platform>", "ios or android")
+  .option("--status <list>", "comma-separated: queued, preparing, running, uploading, succeeded, failed, cancelled")
+  .option("--limit <n>", "how many", "20")
+  .action(wrap(buildsList));
+builds.command("view <number>").description("Status, phases and artifacts of one build").action(wrap(buildsView));
+builds
+  .command("logs <number>")
+  .description("The build log")
+  .option("--follow", "keep printing new lines until the build ends")
+  .option("--tail <n>", "only the last n lines")
+  .action(wrap(buildsLogs));
+builds.command("cancel <number>").description("Cancel a queued or running build").action(wrap(buildsCancel));
+builds
+  .command("download <number>")
+  .description("Download a build's artifacts (.ipa, .apk, .aab)")
+  .option("--kind <kind>", "only this artifact kind, e.g. ipa, apk, aab")
+  .option("--out <dir>", "folder to save into", ".")
+  .action(wrap(buildsDownload));
+
+const submissions = program.command("submissions").description("Store submissions: TestFlight and Google Play");
+submissions.command("list").description("Recent submissions, newest first").option("--limit <n>", "how many", "20").action(wrap(submissionsList));
+submissions.command("view <id>").description("One submission and its progress").action(wrap(submissionsView));
 
 program
   .command("submit")
@@ -128,6 +163,7 @@ device
   .option("--udid <udid>", "add by UDID instead of a registration link")
   .option("--name <name>", "device name (with --udid)")
   .option("--team-id <id>", "Apple team, when the organization has several")
+  .option("--no-wait", "print the registration link and exit instead of waiting for the device (for agents)")
   .action(wrap(deviceAdd));
 device.command("list").description("List registered devices").action(wrap(deviceList));
 device.command("remove <id>").description("Remove a device (disabled at Apple)").action(wrap(deviceRemove));

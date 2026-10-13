@@ -34,7 +34,8 @@ export async function xcodeCloudConnect(opts: ConnectOptions) {
     const s = (await unwrap(lb.POST("/v1/orgs/{org}/projects/{project}/xcode-cloud/connect", { params: { path }, body }))) as Status;
     if (s.step === "ready") {
       printStatus(s);
-      return p.outro(`iOS store builds now run on Xcode Cloud while hours remain. Force an engine with ${pc.cyan("liftbay build --engine xcode-cloud|github-actions")}`);
+      p.outro(`iOS store builds now run on Xcode Cloud while hours remain. Force an engine with ${pc.cyan("liftbay build --engine xcode-cloud|github-actions")}`);
+      return s;
     }
     if (s.step !== last) printStatus(s);
     last = s.step;
@@ -50,10 +51,12 @@ export async function xcodeCloudStatus() {
   const config = requireConfig();
   const s = (await unwrap(client().GET("/v1/orgs/{org}/projects/{project}/xcode-cloud", { params: { path: { org: config.org, project: config.project } } }))) as Status;
   printStatus(s);
+  return s;
 }
 
 export async function xcodeCloudDisconnect() {
   const config = requireConfig();
   await unwrap(client().DELETE("/v1/orgs/{org}/projects/{project}/xcode-cloud", { params: { path: { org: config.org, project: config.project } } }));
   console.log(`${pc.green("✔")} Disconnected. The Liftbay workflow was removed from Xcode Cloud; iOS builds run on GitHub Actions.`);
+  return { connected: false };
 }

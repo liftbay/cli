@@ -6,8 +6,10 @@ import { client, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts
 import { setUpIos } from "./credentials.ts";
 import { cancelled } from "./link.ts";
 import { requireConfig } from "../project.ts";
+import type { components } from "@liftbay/sdk";
 
 type Platform = "ios" | "android";
+type Build = components["schemas"]["Build"];
 type Engine = "auto" | "github-actions" | "xcode-cloud";
 type BuildOptions = { platform?: string; profile?: string; ref?: string; message?: string; simulator?: boolean; wait?: boolean; submit?: boolean; track?: string; engine?: string };
 
@@ -55,7 +57,7 @@ export async function build(opts: BuildOptions) {
   const submitTrack = (opts.track ?? profile.submitTrack) as (typeof TRACKS)[number] | undefined;
   if (submitTrack && !TRACKS.includes(submitTrack)) fail(`--track must be one of ${TRACKS.join(", ")}`);
   if (submit && profile.distribution !== "store") fail(`Profile "${profileName}" builds for ${profile.distribution} distribution; only store builds can be submitted`);
-  const started = [];
+  const started: Build[] = [];
   for (const platform of platforms) {
     const distribution = opts.simulator ? "simulator" : profile.distribution;
     const b = await unwrap(
@@ -69,7 +71,11 @@ export async function build(opts: BuildOptions) {
     );
     started.push(b);
   }
-  if (opts.wait === false) return p.outro("Queued. Follow along in the dashboard.");
+  const summary = (b: Build) => ({ number: b.number, platform: b.platform, status: b.status, engine: b.engine, url: `${dashboardUrl()}/${config.org}/${config.project}/builds/${b.number}` });
+  if (opts.wait === false) {
+    p.outro(`Queued. Follow along in the dashboard, or with ${pc.cyan("liftbay builds view <number>")}.`);
+    return { builds: started.map(summary) };
+  }
 
   // Follow every build; with more than one, prefix lines with the platform.
   const prefix = started.length > 1;
@@ -99,21 +105,27 @@ export async function build(opts: BuildOptions) {
     }),
   );
 
+  const out = [];
   for (const r of results) {
+    let installUrl: string | null = null;
     const mark = r.status === "succeeded" ? pc.green("✔") : r.status === "cancelled" ? pc.yellow("■") : pc.red("✖");
     p.log.message(`${mark} #${r.number} ${r.platform} ${r.status}${r.durationSec ? ` in ${Math.round(r.durationSec / 60)}m ${r.durationSec % 60}s` : ""}`);
     for (const a of r.artifacts.filter((a) => a.status === "ready")) {
       p.log.message(`  ${a.name} ${pc.dim(`(${(a.sizeBytes / 1024 / 1024).toFixed(1)} MB)`)}`);
-    }    // Internal (ad hoc) iOS builds: the page testers open on a registered iPhone to install it.
+    }
+    // Internal (ad hoc) iOS builds: the page testers open on a registered iPhone to install it.
     if (r.status === "succeeded" && r.platform === "ios" && r.artifacts.some((a) => a.kind === "ipa" && a.status === "ready")) {
       const link = await lb.POST("/v1/orgs/{org}/projects/{project}/builds/{number}/install-link", { params: { path: { ...path, number: r.number } } });
       if (link.data) {
+        installUrl = link.data.url;
         p.log.message(`  Install on a registered device: ${pc.cyan(link.data.url)}`);
         p.log.message((await QRCode.toString(link.data.url, { type: "terminal", small: true })).trimEnd());
       }
     }
+    out.push({ ...summary(r), durationSec: r.durationSec, artifacts: r.artifacts, installUrl });
   }
   const failed = results.filter((r) => r.status !== "succeeded");
   p.outro(failed.length ? pc.red(`${failed.length} build${failed.length > 1 ? "s" : ""} did not succeed`) : "Done");
   if (failed.length) process.exitCode = 1;
+  return { builds: out };
 }

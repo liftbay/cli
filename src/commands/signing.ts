@@ -142,6 +142,7 @@ export async function signingInit(opts: { privateKey?: string; certificate?: str
     "Next",
   );
   p.outro("Update signing is set up.");
+  return { privateKey: privateKeyPath, certificate: certificatePath, publicKey: DEFAULT_PUBLIC_KEY, signedOnlyChannels: signedOnly ? channels.map((c) => c.name) : [] };
 }
 
 /** Signs every item of a prepared release; the server checks each one against the certificate. */

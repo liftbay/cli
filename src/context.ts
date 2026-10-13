@@ -6,7 +6,7 @@ import pc from "picocolors";
 
 export { unwrap };
 
-const CONFIG_DIR = process.env.LIFTBAY_CONFIG_DIR ?? join(homedir(), ".liftbay");
+export const CONFIG_DIR = process.env.LIFTBAY_CONFIG_DIR ?? join(homedir(), ".liftbay");
 const CREDENTIALS = join(CONFIG_DIR, "credentials.json");
 
 export const apiUrl = () => process.env.LIFTBAY_API_URL ?? readCredentials()?.apiUrl ?? "https://api.liftbay.dev";
@@ -46,8 +46,42 @@ export function fail(message: string): never {
   throw new CliError(message);
 }
 
+// ── JSON output (for scripts and AI agents) ─────────────────────────────
+
+let json = false;
+let writeStdout: ((chunk: string) => boolean) | null = null;
+
+/**
+ * `--json` (or LIFTBAY_JSON=1): stdout carries exactly one JSON document, the command's result or
+ * `{ "error": … }`. Everything meant for people (progress, logs, notes) moves to stderr, and nothing prompts.
+ */
+export function enableJson() {
+  if (json) return;
+  json = true;
+  writeStdout = process.stdout.write.bind(process.stdout) as (chunk: string) => boolean;
+  process.stdout.write = process.stderr.write.bind(process.stderr) as typeof process.stdout.write;
+}
+
+export const jsonMode = () => json;
+
+/** Prints a command's result in JSON mode; people already saw it as text. */
+export function emit(result: unknown) {
+  if (json) writeStdout!(`${JSON.stringify(result ?? { ok: true }, null, 2)}\n`);
+}
+
 /** Turns API errors into one readable line; everything else is a bug and keeps its stack. */
 export function reportError(e: unknown): never {
+  if (json) {
+    const error =
+      e instanceof LiftbayApiError
+        ? { code: e.code, message: e.message, status: e.status, fields: e.fields }
+        : e instanceof CliError
+          ? { code: "cli_error", message: e.message }
+          : { code: "internal", message: e instanceof Error ? e.message : String(e) };
+    writeStdout!(`${JSON.stringify({ error }, null, 2)}\n`);
+    if (!(e instanceof CliError) && !(e instanceof LiftbayApiError)) console.error(e);
+    process.exit(1);
+  }
   if (e instanceof CliError) console.error(`${pc.red("✖")} ${e.message}`);
   else if (e instanceof LiftbayApiError) {
     console.error(`${pc.red("✖")} ${e.message}${e.status === 401 ? pc.dim("  (run `liftbay login`)") : ""}`);
@@ -56,4 +90,10 @@ export function reportError(e: unknown): never {
   process.exit(1);
 }
 
-export const isInteractive = () => process.stdout.isTTY && !process.env.CI;
+/** A person at a terminal. Agents, CI and `--json` never get prompts: missing input is an error naming the flag. */
+export const isInteractive = () => !json && !!process.stdin.isTTY && !!process.stdout.isTTY && !process.env.CI;
+
+/** Called where a prompt would be the only way forward: fails with what to pass instead when no one can answer. */
+export function needInteractive(instead: string) {
+  if (!isInteractive()) fail(instead);
+}

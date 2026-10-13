@@ -81,6 +81,7 @@ export async function publish(opts: { channel?: string; profile?: string; messag
   })();
 
   p.intro(pc.bgCyan(pc.black(" liftbay update publish ")));
+  if (!platforms.every((x) => x === "ios" || x === "android")) fail("--platform must be ios, android or all");
   p.log.step(`Exporting ${platforms.join(" and ")} bundles`);
   const { out, bundles } = await exportBundles(platforms);
   try {
@@ -110,6 +111,7 @@ export async function publish(opts: { channel?: string; profile?: string; messag
 
     // With an update signing key, Liftbay prepares the exact bytes and this machine signs them.
     const key = loadPrivateKey(opts.privateKey);
+    const published = [];
     if (key) p.log.info(`Signing with ${pc.cyan(key.source)}`);
     for (const [runtime, group] of groups) {
       const body = {
@@ -137,11 +139,14 @@ export async function publish(opts: { channel?: string; profile?: string; messag
       // An emergency publish on Free past its monthly publishes, or the bandwidth limit is reached.
       const notice = (await request).response.headers.get("Liftbay-Notice");
       if (notice) p.log.warn(notice);
+      published.push({ id: release.id, channel, runtimeVersion: runtime, platforms: group, rolloutPercent: release.rolloutPercent, signed: release.signed, message, notice });
       p.log.success(
         `Published to ${pc.bold(channel)} · runtime ${runtime} · ${group.join(", ")}${release.rolloutPercent < 100 ? ` · ${release.rolloutPercent}% rollout` : ""}${release.signed ? " · signed" : ""}`,
       );
     }
-    p.outro(`${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}/updates/${channel}`)}`);
+    const url = `${dashboardUrl()}/${config.org}/${config.project}/updates/${channel}`;
+    p.outro(pc.dim(url));
+    return { releases: published, url };
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
@@ -151,11 +156,12 @@ export async function list(opts: { channel?: string }) {
   const config = requireConfig();
   const channel = opts.channel ?? "production";
   const releases = await unwrap(client().GET("/v1/orgs/{org}/projects/{project}/channels/{channel}/releases", { params: { path: { org: config.org, project: config.project, channel } } }));
-  if (!releases.length) return console.log(`No releases on ${channel} yet.`);
+  if (!releases.length) console.log(`No releases on ${channel} yet.`);
   for (const r of releases.slice(0, 20)) {
     const status = r.status === "active" ? pc.green("active") : r.status === "rolled_back" ? pc.red("rolled back") : pc.dim("superseded");
     console.log(`${new Date(r.createdAt).toLocaleString().padEnd(24)} ${status.padEnd(22)} ${String(r.rolloutPercent).padStart(3)}%  ${pc.dim(r.runtimeVersion.padEnd(10))} ${r.message}`);
   }
+  return { channel, releases: releases.slice(0, 20) };
 }
 
 async function activeRelease(channel: string) {
@@ -174,6 +180,7 @@ export async function rollback(opts: { channel?: string }) {
   // The plan's OTA bandwidth is used up: the rollback still reaches devices, newer updates wait.
   const notice = (await request).response.headers.get("Liftbay-Notice");
   if (notice) console.log(`${pc.yellow("!")} ${notice}`);
+  return { rolledBack: { id: active.id, message: active.message }, active: res.active, notice };
 }
 
 export async function rollout(percent: string, opts: { channel?: string }) {
@@ -182,10 +189,12 @@ export async function rollout(percent: string, opts: { channel?: string }) {
     client().PATCH("/v1/orgs/{org}/projects/{project}/channels/{channel}/releases/{release}/rollout", { params: { path: { ...path, release: active.id } }, body: { rolloutPercent: Number(percent) } }),
   );
   console.log(`${pc.green("✔")} "${r.message}" now rolls out to ${r.rolloutPercent}%`);
+  return { id: r.id, message: r.message, rolloutPercent: r.rolloutPercent };
 }
 
 export async function channels() {
   const config = requireConfig();
   const list = await unwrap(client().GET("/v1/orgs/{org}/projects/{project}/channels", { params: { path: { org: config.org, project: config.project } } }));
   for (const c of list) console.log(`${pc.bold(c.name.padEnd(16))} env ${c.environmentSlug.padEnd(12)} ${c.protocols.join(", ").padEnd(32)} ${pc.dim(c.currentRelease?.message ?? "no active release")}`);
+  return { channels: list };
 }

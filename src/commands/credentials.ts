@@ -4,7 +4,7 @@ import * as p from "@clack/prompts";
 import { LiftbayApiError } from "@liftbay/sdk";
 import pc from "picocolors";
 import { AppleAuthError, AppleSession, type AppleTeam } from "../apple/index.ts";
-import { client, fail, isInteractive, unwrap } from "../context.ts";
+import { client, fail, isInteractive, needInteractive, unwrap } from "../context.ts";
 import { expoConfig, requireConfig } from "../project.ts";
 import { cancelled } from "./link.ts";
 
@@ -49,13 +49,20 @@ function readP8(path: string) {
   return { privateKeyP8, keyIdFromName: basename(path).match(/AuthKey_([A-Z0-9]{10})\.p8$/)?.[1] };
 }
 
+const MANUAL_APPLE = "Apple ID sign-in needs a person: run `liftbay credentials ios` yourself in a terminal (the Apple session is saved for later runs), or pass an App Store Connect API key with --p8 <file> --key-id <id> --issuer-id <uuid> --team-id <id>.";
+
 /** Signs in with the Apple ID (2FA in the terminal), picks the team and creates an API key for Liftbay. */
 async function keyFromAppleId(opts: IosCredentialOptions) {
+  if (!opts.appleId && !process.env.LIFTBAY_APPLE_ID) needInteractive(`Pass --apple-id <email> (or LIFTBAY_APPLE_ID). ${MANUAL_APPLE}`);
   const appleId =
     opts.appleId ?? process.env.LIFTBAY_APPLE_ID ?? cancelled(await p.text({ message: "Apple ID (email)", validate: (v) => (v?.includes("@") ? undefined : "Enter the email of your Apple developer account") }));
   const session = await AppleSession.signIn(appleId, {
-    password: async () => process.env.LIFTBAY_APPLE_PASSWORD ?? cancelled(await p.password({ message: `Password for ${appleId}` })),
+    password: async () => {
+      if (!process.env.LIFTBAY_APPLE_PASSWORD) needInteractive(MANUAL_APPLE);
+      return process.env.LIFTBAY_APPLE_PASSWORD ?? cancelled(await p.password({ message: `Password for ${appleId}` }));
+    },
     code: async (info) => {
+      needInteractive(`Apple asked for a two-factor code. ${MANUAL_APPLE}`);
       // Values are strings for the prompt: "device", or a phone id to text a code to.
       const options = [
         ...(info.deviceCode ? [{ value: "device", label: "Enter the code shown on your Apple devices" }] : []),
@@ -69,6 +76,7 @@ async function keyFromAppleId(opts: IosCredentialOptions) {
 
   const teams = await session.teams();
   if (!teams.length) fail("This Apple ID has no developer team. Join the Apple Developer Program first.");
+  if (!teams.some((t) => t.teamId === opts.teamId) && teams.length > 1) needInteractive(`This Apple ID has several teams; pass --team-id (${teams.map((t) => `${t.teamId} ${t.name}`).join(", ")})`);
   const team: AppleTeam =
     teams.find((t) => t.teamId === opts.teamId) ??
     (teams.length === 1 ? teams[0]! : cancelled(await p.select({ message: "Apple team", options: teams.map((t) => ({ value: t, label: `${t.name} (${t.teamId})` })) })));
@@ -88,6 +96,8 @@ async function keyFromAppleId(opts: IosCredentialOptions) {
 
 /** The .p8 route: for CI, or for people who don't want to type their Apple password. */
 async function keyFromP8(opts: IosCredentialOptions) {
+  const missing = [!opts.p8 && "--p8 <file>", !opts.keyId && !opts.p8?.match(/AuthKey_[A-Z0-9]{10}\.p8$/) && "--key-id <id>", !opts.issuerId && "--issuer-id <uuid>", !opts.teamId && "--team-id <id>"].filter(Boolean);
+  if (missing.length) needInteractive(`An App Store Connect API key needs ${missing.join(", ")}. Or sign in with an Apple ID: --apple-id <email> after you've signed in once in a terminal. ${MANUAL_APPLE}`);
   const path = opts.p8 ?? cancelled(await p.text({ message: "Path to the AuthKey_XXXXXXXXXX.p8 file" }));
   const { privateKeyP8, keyIdFromName } = readP8(path.replace(/^~/, process.env.HOME ?? "~"));
   const keyId = opts.keyId ?? keyIdFromName ?? cancelled(await p.text({ message: "Key ID" }));
@@ -110,6 +120,7 @@ export async function setUpIos(opts: IosCredentialOptions) {
   const overview = await unwrap(lb.GET("/v1/orgs/{org}/apple", { params: { path: org } }));
   let teamId = opts.teamId ?? (overview.keys.length === 1 ? overview.keys[0]!.teamId : undefined);
   if (!opts.p8 && overview.keys.length > 1 && !teamId) {
+    needInteractive(`The organization has keys for several Apple teams; pass --team-id (${overview.keys.map((k) => `${k.teamId} ${k.teamName ?? ""}`.trim()).join(", ")})`);
     teamId = cancelled(await p.select({ message: "Apple team", options: overview.keys.map((k) => ({ value: k.teamId, label: `${k.teamName ?? k.teamId} (${k.teamId})` })) }));
   }
   const haveKey = !opts.p8 && !!teamId && overview.keys.some((k) => k.teamId === teamId);
@@ -117,7 +128,7 @@ export async function setUpIos(opts: IosCredentialOptions) {
     p.log.info(`Using the App Store Connect key saved for team ${teamId}`);
   } else {
     const method =
-      opts.p8 || opts.keyId ? "p8" : opts.yes || !isInteractive() ? (process.env.LIFTBAY_APPLE_ID ? "apple" : "p8") : cancelled(
+      opts.p8 || opts.keyId ? "p8" : opts.yes || !isInteractive() ? (opts.appleId || process.env.LIFTBAY_APPLE_ID ? "apple" : "p8") : cancelled(
         await p.select({
           message: "How should Liftbay access your Apple developer account?",
           options: [
@@ -193,15 +204,17 @@ export async function credentialsIosCommand(opts: IosCredentialOptions & { signO
   if (opts.signOut) {
     const appleId = opts.appleId ?? fail("Pass --apple-id to sign out of that Apple ID");
     AppleSession.forget(appleId);
-    return console.log(`${pc.green("✔")} Removed the saved Apple session for ${appleId}`);
+    console.log(`${pc.green("✔")} Removed the saved Apple session for ${appleId}`);
+    return { signedOut: appleId };
   }
   p.intro(pc.bgCyan(pc.black(" liftbay credentials ios ")));
-  await setUpIos(opts);
+  const result = await setUpIos(opts);
   p.outro(
     opts.adhoc
       ? `Internal iOS builds now install on your registered devices. Start one with ${pc.cyan("liftbay build --platform ios --profile preview")}`
       : `iOS builds are now signed. Start one with ${pc.cyan("liftbay build --platform ios")}`,
   );
+  return result;
 }
 
 /** What's stored: the organization's Apple keys and this project's signing material. */
@@ -224,6 +237,7 @@ export async function credentialsCommand() {
   );
   const play = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/stores/google-play", { params: { path: { org: config.org, project: config.project } } }));
   console.log(`  Google Play        ${play ? `${pc.green("ready")} · ${play.clientEmail}` : pc.dim(`none (liftbay credentials android --play-key key.json)`)}`);
+  return { apple, signing, googlePlay: play };
 }
 
 export type AndroidImportOptions = { keystore?: string; alias?: string; storePassword?: string; keyPassword?: string; replace?: boolean; yes?: boolean };
@@ -268,6 +282,7 @@ export async function credentialsAndroidImportCommand(opts: AndroidImportOptions
   }
   console.log(`${pc.green("✔")} Upload key imported (encrypted) · alias ${status.android?.keyAlias ?? keyAlias}`);
   if (status.android?.certificateSha256) console.log(pc.dim(`  Certificate SHA-256 ${fingerprint(status.android.certificateSha256)}\n  It should match the upload key certificate in Play Console → Test and release → App integrity.`));
+  return { android: status.android };
 }
 
 /** Downloads the stored upload keystore and its passwords, for a backup. Owners and admins only; audit logged. */
@@ -302,4 +317,5 @@ export async function credentialsAndroidExportCommand(opts: { out?: string; forc
   console.log(`${pc.green("✔")} Passwords     ${properties}`);
   console.log(`  Alias ${key.keyAlias} · ${key.format.toUpperCase()}${key.certificateSha256 ? ` · SHA-256 ${fingerprint(key.certificateSha256)}` : ""}`);
   console.log(pc.yellow("! These files contain your upload key and its passwords. Keep them somewhere safe and out of git."));
+  return { keystore: out, properties, keyAlias: key.keyAlias, format: key.format };
 }

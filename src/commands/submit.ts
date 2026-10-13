@@ -33,7 +33,10 @@ export async function submit(opts: SubmitOptions) {
     p.log.step(`Build ${pc.bold(`#${s.buildNumber}`)} → ${s.target === "testflight" ? "TestFlight" : `Play ${s.target}${s.rolloutPercent ? ` (${s.rolloutPercent}%)` : ""}`}`);
     queued.push(s);
   }
-  if (opts.wait === false) return p.outro(`Queued. Follow along in the dashboard: ${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}/submissions`)}`);
+  if (opts.wait === false) {
+    p.outro(`Queued. Follow along with ${pc.cyan("liftbay submissions list")} or in the dashboard: ${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}/submissions`)}`);
+    return { submissions: queued };
+  }
 
   const results = await Promise.all(
     queued.map(async (s) => {
@@ -51,6 +54,7 @@ export async function submit(opts: SubmitOptions) {
   for (const r of results) p.log.message(`${r.status === "succeeded" ? pc.green("✔") : pc.red("✖")} #${r.buildNumber} ${r.message ?? r.status}`);
   p.outro(failed.length ? pc.red(`${failed.length} submission${failed.length > 1 ? "s" : ""} failed`) : "Submitted");
   if (failed.length) process.exitCode = 1;
+  return { submissions: results };
 }
 
 /** Saves the Google Play service account used for Play uploads. */
@@ -60,11 +64,13 @@ export async function credentialsAndroidCommand(opts: { playKey?: string; remove
   const path = { org: config.org, project: config.project };
   if (opts.remove) {
     await unwrap(lb.DELETE("/v1/orgs/{org}/projects/{project}/stores/google-play", { params: { path } }));
-    return console.log(`${pc.green("✔")} Removed the Google Play service account`);
+    console.log(`${pc.green("✔")} Removed the Google Play service account`);
+    return { googlePlay: null };
   }
   if (!opts.playKey) {
     const status = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/stores/google-play", { params: { path } }));
-    return console.log(status ? `Google Play service account: ${status.clientEmail}` : `No Google Play service account. Add one with ${pc.cyan("liftbay credentials android --play-key key.json")}`);
+    console.log(status ? `Google Play service account: ${status.clientEmail}` : `No Google Play service account. Add one with ${pc.cyan("liftbay credentials android --play-key key.json")}`);
+    return { googlePlay: status };
   }
   let json: string;
   try {
@@ -79,4 +85,5 @@ export async function credentialsAndroidCommand(opts: { playKey?: string; remove
     throw e;
   });
   spin.stop(`Saved (encrypted): ${status?.clientEmail}`);
+  return { googlePlay: status };
 }

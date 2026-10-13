@@ -203,8 +203,9 @@ export async function ciInitCommand(opts: SetupOptions) {
   await ensureSignedIn(opts);
   const app = await detectApp();
   const config = await ensureLinked(app, opts);
-  await ciInit(app, config, opts);
+  const next = await ciInit(app, config, opts);
   p.outro(`Builds are configured. Start one with ${pc.cyan("liftbay build --profile preview")}`);
+  return { config: next };
 }
 
 export async function otaInitCommand(opts: SetupOptions) {
@@ -212,8 +213,9 @@ export async function otaInitCommand(opts: SetupOptions) {
   await ensureSignedIn(opts);
   const app = await detectApp();
   const config = await ensureLinked(app, opts);
-  await otaInit(app, config, opts);
+  const next = await otaInit(app, config, opts);
   p.outro(nextStepsOta());
+  return { config: next };
 }
 
 const nextStepsOta = () =>
@@ -240,4 +242,9 @@ export async function initCommand(opts: SetupOptions & { ota?: boolean }) {
   p.outro(
     `Done. ${pc.dim(`${dashboardUrl()}/${config.org}/${config.project}`)}\n\n  Build:  ${pc.cyan("liftbay build --profile preview")}${wantOta ? `\n  Update: ${pc.cyan("liftbay update publish --channel production")}` : ""}`,
   );
+  return {
+    config,
+    url: `${dashboardUrl()}/${config.org}/${config.project}`,
+    next: ["Commit liftbay.json, .github/workflows/liftbay.yml and app.json, and push", "liftbay build --profile preview", ...(wantOta ? ["liftbay update publish --channel production"] : [])],
+  };
 }
