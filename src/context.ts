@@ -100,8 +100,14 @@ export function reportError(e: unknown): never {
   process.exit(1);
 }
 
+let promptsOff = false;
+/** No prompts for the rest of this run, even in a terminal: `init --answers` has every answer already. */
+export function disablePrompts() {
+  promptsOff = true;
+}
+
 /** A person at a terminal. Agents, CI and `--json` never get prompts: missing input is an error naming the flag. */
-export const isInteractive = () => !json && !!process.stdin.isTTY && !!process.stdout.isTTY && !process.env.CI;
+export const isInteractive = () => !json && !promptsOff && !!process.stdin.isTTY && !!process.stdout.isTTY && !process.env.CI;
 
 /** Called where a prompt would be the only way forward: fails with what to pass instead when no one can answer. */
 export function needInteractive(instead: string) {

@@ -1,6 +1,6 @@
 {
   "name": "liftbay",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "Build, sign, submit and update React Native apps from your own CI.",
   "keywords": [
     "react-native",

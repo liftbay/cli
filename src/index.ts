@@ -15,7 +15,7 @@ import { githubConnect, githubStatus, githubWorkflow } from "./commands/github.t
 
 const program = new Command("liftbay")
   .description("Build, ship and update React Native apps")
-  .version("0.5.2")
+  .version("0.6.0")
   .option("--json", "print the result as JSON on stdout (progress goes to stderr; never prompts). Also LIFTBAY_JSON=1")
   .hook("preAction", () => {
     if (program.opts().json || process.env.LIFTBAY_JSON === "1") enableJson();
@@ -53,7 +53,16 @@ program
 program.command("logout").description("Sign out and remove the saved token").action(wrap(logout));
 program.command("whoami").description("Show the signed-in user and organizations").action(wrap(whoami));
 
-setupOptions(program.command("init").description("Set up this app: link the project, builds, then OTA updates").option("--no-ota", "skip OTA updates")).action(wrap(initCommand));
+setupOptions(
+  program
+    .command("init")
+    .description("Set up this app: link the project, builds, then OTA updates")
+    .option("--no-ota", "skip OTA updates")
+    .option("--new-org <name>", "create an organization with this name")
+    .option("--project-name <name>", "create the project with this name")
+    .option("--questions", "list every question init would ask, with the choices for this app, and exit (for agents: interview the person)")
+    .option("--answers <file>", "run with the answers in this JSON file, without any prompts (see --questions)"),
+).action(wrap(initCommand));
 
 const ci = program.command("ci").description("Builds");
 setupOptions(ci.command("init").description("Set up build profiles, environments and app identifiers")).action(wrap(ciInitCommand));
@@ -66,7 +75,8 @@ program
   .option("--ref <ref>", "branch, tag or commit to build (default: current branch)")
   .option("-m, --message <text>", "build message")
   .option("--simulator", "iOS: build for the simulator instead of a signed .ipa")
-  .option("--no-wait", "queue and exit without following the logs")
+  .option("--no-wait", "queue and exit without following the build")
+  .option("--logs", "show the whole build log as it runs, instead of just the steps")
   .option("--submit", "submit store builds when they succeed: TestFlight, or a Google Play track")
   .option("--track <track>", "Play track for --submit: internal, alpha, beta or production")
   .option("--engine <engine>", "where this iOS store build runs: github-actions or xcode-cloud (asked in a terminal; otherwise the project's setting)")

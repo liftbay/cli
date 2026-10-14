@@ -3,12 +3,13 @@ import { dirname } from "node:path";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { WORKFLOW_YAML } from "../generated/workflow.ts";
-import { CliError, client, cmd, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
+import { CliError, client, cmd, dashboardUrl, disablePrompts, fail, isInteractive, unwrap } from "../context.ts";
+import { answersToOptions, initQuestions, readAnswers } from "./answers.ts";
 import { checkboxes } from "../prompts.ts";
 import { ensureGithub, type GithubCheck } from "./github.ts";
 import { detectApp, output, readAppJson, runQuiet, writeAppJson, writeConfig, type BuildProfile, type DetectedApp, type IosEngine, type LiftbayConfig } from "../project.ts";
 import { ensureSignedIn } from "./auth.ts";
-import { ensureEnvironment, importVariables, printImport, readEasProfiles, type ImportResult } from "./env.ts";
+import { ensureEnvironment, envImport, importVariables, printImport, readEasProfiles, type ImportResult } from "./env.ts";
 import { cancelled, ensureLinked, type LinkOptions } from "./link.ts";
 
 export type SetupOptions = LinkOptions & { platforms?: string; iosEngine?: string; runtimePolicy?: "appVersion" | "fingerprint"; apiUrl?: string; dashboardUrl?: string; eas?: boolean };
@@ -296,7 +297,16 @@ const nextStepsOta = () =>
   `OTA updates are configured.\n\n  1. Build a new binary once (the update URL and channel are baked in)\n  2. Ship JS changes with ${pc.cyan(cmd("liftbay update publish --channel production"))}`;
 
 /** The wizard: sign in, link the project, set up builds, then OTA updates. */
-export async function initCommand(opts: SetupOptions & { ota?: boolean }) {
+export async function initCommand(opts: SetupOptions & { ota?: boolean; questions?: boolean; answers?: string }) {
+  if (opts.questions) return initQuestions();
+  // An agent's interview, all answered up front: no prompts for the rest of the run.
+  let envFiles: Record<string, string[]> | undefined;
+  if (opts.answers) {
+    const answers = readAnswers(opts.answers);
+    Object.assign(opts, answersToOptions(answers));
+    envFiles = answers.envFiles;
+    disablePrompts();
+  }
   p.intro(pc.bgCyan(pc.black(" liftbay init ")));
   await ensureSignedIn(opts);
   const app = await detectApp();
@@ -312,6 +322,11 @@ export async function initCommand(opts: SetupOptions & { ota?: boolean }) {
   const wantOta = opts.ota ?? (opts.yes || !isInteractive() ? true : cancelled(await p.confirm({ message: "Set up over-the-air updates with expo-updates?", initialValue: true })));
   if (wantOta) config = await otaInit(await detectApp(), config, opts);
   else p.log.info(`Skipped. Run ${pc.cyan(cmd("liftbay ota init"))} any time.`);
+
+  const imported = [];
+  for (const [environment, files] of Object.entries(envFiles ?? {})) {
+    if (files.length) imported.push(...(await envImport(files, { environment })).imported);
+  }
 
   p.log.step(pc.bold("3/3  GitHub"));
   const github = await githubStep();
@@ -329,7 +344,7 @@ export async function initCommand(opts: SetupOptions & { ota?: boolean }) {
   return {
     github,
     config,
-    imported: lastImport,
+    imported: [...lastImport, ...imported],
     url: `${dashboardUrl()}/${config.org}/${config.project}`,
     next: ["Commit liftbay.json, .github/workflows/liftbay.yml and app.json, and push", "liftbay build --profile preview", ...(wantOta ? ["liftbay update publish --channel production"] : [])],
   };

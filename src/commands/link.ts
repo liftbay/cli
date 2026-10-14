@@ -3,7 +3,15 @@ import pc from "picocolors";
 import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
 import { readConfig, writeConfig, type DetectedApp, type LiftbayConfig } from "../project.ts";
 
-export type LinkOptions = { org?: string; project?: string; yes?: boolean };
+export type LinkOptions = {
+  org?: string;
+  project?: string;
+  yes?: boolean;
+  /** Create a new organization with this name (instead of using an existing one). */
+  newOrg?: string;
+  /** Create the project with this name (its URL is made from it). */
+  projectName?: string;
+};
 
 /** Unwraps a prompt answer; Ctrl+C ends the wizard cleanly. */
 function cancelled<T>(value: T): Exclude<T, symbol> {
@@ -50,17 +58,23 @@ export async function ensureLinked(app: DetectedApp, opts: LinkOptions): Promise
   }
   const lb = client();
   const orgs = await unwrap(lb.GET("/v1/orgs"));
-  if (!orgs.length) orgs.push(await createFirstOrg(lb, opts.org));
-
-  let org = opts.org ?? (orgs.length === 1 ? orgs[0]!.slug : undefined);
+  let org: string | undefined;
+  if (opts.newOrg || !orgs.length) {
+    // A new account has none yet; --new-org adds another. Use the URL it was created with, not the name.
+    const created = await createFirstOrg(lb, opts.newOrg ?? opts.org);
+    orgs.push(created);
+    org = created.slug;
+  }
+  org ??= opts.org ?? (orgs.length === 1 ? orgs[0]!.slug : undefined);
+  if (opts.org && !orgs.some((o) => o.slug === org)) fail(`You're not in an organization "${opts.org}" (${orgs.map((o) => o.slug).join(", ")}). To create one, pass --new-org "<name>".`);
   if (!org) {
     if (!isInteractive()) fail(`Several organizations available; pass --org (${orgs.map((o) => o.slug).join(", ")})`);
     org = cancelled(await p.select({ message: "Organization", options: orgs.map((o) => ({ value: o.slug, label: o.name, hint: o.slug })) }));
   }
 
   const projects = await unwrap(lb.GET("/v1/orgs/{org}/projects", { params: { path: { org } } }));
-  let slug = opts.project;
-  let projectName: string | undefined;
+  let projectName: string | undefined = opts.projectName;
+  let slug = opts.project ?? (projectName ? slugifyProject(projectName) : undefined);
   if (!slug) {
     const match = projects.find((pr) => pr.slug === app.slug);
     if (opts.yes || !isInteractive()) slug = match?.slug ?? app.slug;

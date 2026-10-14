@@ -41,18 +41,35 @@ It returns `{"status": "signed_in", "user": {...}}`. The request expires after 1
 
 **CI or unattended agents:** set `LIFTBAY_TOKEN` to an organization API token instead. The user creates it at `https://liftbay.dev/<org>/tokens`, and it takes priority over the saved login.
 
-## 2. Link the app (once per repository)
+## 2. Link the app (once per repository): interview, then init
 
-```bash
-liftbay init --yes --json
-```
+`init` has several choices that belong to the person, not to you: which organization and project, which platforms, where iOS builds run, whether to use `eas.json`, OTA updates, and which `.env` files go where. Don't guess them. Interview the person first:
+
+1. Get the questions, with the choices that apply to this app:
+   ```bash
+   liftbay init --questions --json
+   ```
+   This returns `questions` (each with an `id`, the question, its choices and a default), an `example` answers object, and `next`. It changes nothing.
+2. Ask the person every question. Use your ask-the-user tool if you have one (Claude Code's AskUserQuestion, or your platform's equivalent), with the listed choices as options and the default first. Skip questions whose `when` doesn't apply. For `envFiles`, confirm which file goes to which environment; `.env` and `.env.local` often hold local development values.
+3. Write the answers to a file, for example `liftbay-answers.json`, using the question ids as keys:
+   ```json
+   { "org": "acme", "newProject": "Buddy", "platforms": ["ios", "android"], "iosEngine": "github-actions", "eas": true, "ota": true, "runtimePolicy": "appVersion", "envFiles": { "production": [".env.production"] } }
+   ```
+   Use `org` for an existing organization or `newOrg` for a new one, and `project` for an existing project or `newProject` for a new one.
+4. Run init with them. No prompts:
+   ```bash
+   liftbay init --answers liftbay-answers.json --json
+   ```
+   Then delete the answers file; it isn't needed again.
 
 This detects the app (Expo or bare React Native), creates or links the Liftbay project, and writes `liftbay.json`. It also writes `.github/workflows/liftbay.yml` and sets up OTA updates with expo-updates and `@liftbay/expo-plugin` in `app.json`.
 
 **Coming from EAS:** when the app has an `eas.json`, `init` uses it. Each EAS build profile becomes a Liftbay build profile with the same name, channel and distribution, and its `env` (with `extends` resolved) goes into an environment of the same name. Pass `--no-eas` to use Liftbay's default profiles instead.
 
-Useful flags:
-- `--org <slug>`: required if the user is in several organizations; the error lists them. For a new account with no organization yet, `init` creates one, named after `--org` or the person's name.
+Flags, if you run `init` without an answers file:
+- `--org <slug>`: required if the user is in several organizations; the error lists them.
+- `--new-org <name>`: create an organization. A new account with none gets one, named after the person, if this isn't given.
+- `--project-name <name>`: create the project with this name.
 - `--project <slug>`
 - `--platforms ios|android|all`
 - `--runtime-policy appVersion|fingerprint`
@@ -144,7 +161,7 @@ liftbay build --platform ios --profile production --no-wait --json
 
 Always pass `--platform` and `--profile`. In a terminal the CLI asks for anything left out, but as an agent you have no terminal, so it would fall back to the `production` profile and all of its platforms. Before queuing, `build` checks that the branch is pushed and that GitHub is ready, and fails with what to fix.
 
-The result is `{"builds": [{"number": 12, "platform": "ios", "status": "queued", "url": ...}]}`. Builds take about 5–40 minutes, iOS longer. Check progress:
+The result is `{"builds": [{"number": 12, "platform": "ios", "status": "queued", "url": ...}]}`. Without `--no-wait`, `build` shows each finished step and, when a build fails, the end of its log. `--logs` streams the whole log instead. Builds take about 5–40 minutes, iOS longer. Check progress:
 
 ```bash
 liftbay builds view 12 --json             # status, phases, artifacts; installUrl for ad hoc iOS builds

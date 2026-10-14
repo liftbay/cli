@@ -58,7 +58,7 @@ async function waitForInstall(lb: Lb, config: LiftbayConfig, attempt: string | u
   spin.start(fit("Waiting for the GitHub App to be installed"));
   /** Explains a change above the spinner: spinner text has to stay on one line. */
   const explain = (text: string, spinnerText: string) => {
-    spin.stop(pc.dim("…"));
+    spin.clear();
     p.log.info(text);
     spin.start(fit(spinnerText));
   };

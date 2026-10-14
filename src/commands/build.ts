@@ -7,12 +7,15 @@ import { setUpIos } from "./credentials.ts";
 import { cancelled } from "./link.ts";
 import { requireConfig } from "../project.ts";
 import { ensureGithub } from "./github.ts";
+import { fit } from "../prompts.ts";
 import type { components } from "@liftbay/sdk";
 
 type Platform = "ios" | "android";
 type Build = components["schemas"]["Build"];
 type Engine = "auto" | "github-actions" | "xcode-cloud";
-type BuildOptions = { platform?: string; profile?: string; ref?: string; message?: string; simulator?: boolean; wait?: boolean; submit?: boolean; track?: string; engine?: string };
+type BuildOptions = { platform?: string; profile?: string; ref?: string; message?: string; simulator?: boolean; wait?: boolean; submit?: boolean; track?: string; engine?: string; logs?: boolean };
+type Lb = ReturnType<typeof client>;
+type ProjectPath = { org: string; project: string };
 
 const TRACKS = ["internal", "alpha", "beta", "production"] as const;
 
@@ -41,6 +44,101 @@ function pushState(branch: string): { upstream: boolean; ahead: number } {
   } catch {
     return { upstream: true, ahead: 0 };
   }
+}
+
+const minutes = (sec: number | null | undefined) => (sec ? (sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`) : "");
+
+/** What a build is doing right now, in a few words. */
+function activity(b: Build): string {
+  if (b.status === "queued") return b.engine === "xcode-cloud" ? "Waiting for Xcode Cloud" : "Waiting for a runner";
+  if (b.status === "preparing") return "Starting";
+  if (b.status === "uploading") return "Uploading";
+  return b.phases.find((ph) => ph.status === "running")?.name ?? "Building";
+}
+
+/**
+ * Follows builds step by step: a spinner with what each is doing, and a line per finished step. Reads only
+ * the build's status and phases, never its log, so it stays quiet however much the build prints.
+ */
+export async function followSteps(lb: Lb, path: ProjectPath, started: Build[]): Promise<Build[]> {
+  const tag = (b: Build) => (started.length > 1 ? `${b.platform === "ios" ? "iOS" : "Android"} · ` : "");
+  const shown = new Map<number, Set<string>>(started.map((b) => [b.number, new Set<string>()]));
+  const latest = new Map<number, Build>(started.map((b) => [b.number, b]));
+  const runnerSeen = new Set<number>();
+  // No guide bar: restarted after every step line, the spinner would otherwise add a "│" spacer each time.
+  const spin = p.spinner({ withGuide: false });
+  spin.start(fit(started.map((b) => `${tag(b)}${activity(b)}`).join("   ")));
+  const say = (line: string) => {
+    spin.clear();
+    // One line per step, without the blank spacer line clack's log adds: a build has many steps.
+    process.stdout.write(`${pc.gray("│")}  ${line}\n`);
+    spin.start(fit(started.map((b) => `${tag(b)}${activity(latest.get(b.number)!)}`).join("   ")));
+  };
+  for (;;) {
+    for (const b of started) {
+      const prev = latest.get(b.number)!;
+      if (FINISHED.has(prev.status)) continue;
+      const fresh = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } }));
+      latest.set(b.number, fresh);
+      if (fresh.status !== "queued" && !runnerSeen.has(b.number)) {
+        runnerSeen.add(b.number);
+        say(`${pc.green("✔")} ${tag(b)}${fresh.engine === "xcode-cloud" ? "Xcode Cloud started" : "Runner started"}`);
+      }
+      for (const ph of fresh.phases) {
+        if (ph.status === "running" || ph.status === "queued" || shown.get(b.number)!.has(ph.name)) continue;
+        shown.get(b.number)!.add(ph.name);
+        const mark = ph.status === "succeeded" ? pc.green("✔") : ph.status === "cancelled" ? pc.yellow("■") : pc.red("✖");
+        say(`${mark} ${tag(b)}${ph.name} ${pc.dim(minutes(ph.durationSec))}`);
+      }
+    }
+    const all = [...latest.values()];
+    if (all.every((b) => FINISHED.has(b.status))) {
+      spin.stop(all.every((b) => b.status === "succeeded") ? "Finished" : "Finished with problems");
+      return all;
+    }
+    spin.message(fit(all.map((b) => `${tag(b)}${FINISHED.has(b.status) ? b.status : activity(b)}`).join("   ")));
+    await sleep(3000);
+  }
+}
+
+/** The whole build log as it happens (--logs); with more than one build, lines carry the platform. */
+async function followLogs(lb: Lb, path: ProjectPath, started: Build[]): Promise<Build[]> {
+  const prefix = started.length > 1;
+  return Promise.all(
+    started.map(async (b) => {
+      let after = 0;
+      let phase: string | null = null;
+      for (;;) {
+        const page = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}/logs", { params: { path: { ...path, number: b.number }, query: { after } } }));
+        for (const l of page.lines) {
+          const tag = prefix ? pc.dim(`${b.platform.padEnd(8)}`) : "";
+          if (l.phase && l.phase !== phase) {
+            phase = l.phase;
+            console.log(`${tag}${pc.cyan(`==> ${phase}`)}`);
+          }
+          console.log(`${tag}${l.stream === "stderr" ? pc.red(l.text) : l.stream === "system" ? pc.dim(l.text) : l.text}`);
+        }
+        after = page.nextSeq;
+        if (page.complete) break;
+        if (!page.lines.length) {
+          const fresh = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } }));
+          if (FINISHED.has(fresh.status) && fresh.logLineCount <= after) break;
+          await sleep(2000);
+        }
+      }
+      return unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } }));
+    }),
+  );
+}
+
+/** A failed build's last log lines: usually the reason. The whole log is one command away. */
+async function printLogTail(lb: Lb, path: ProjectPath, b: Build, tagged: boolean, count = 30) {
+  const after = Math.max(0, b.logLineCount - count);
+  const page = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}/logs", { params: { path: { ...path, number: b.number }, query: { after } } })).catch(() => null);
+  if (!page?.lines.length) return;
+  p.log.error(`${tagged ? `${b.platform === "ios" ? "iOS" : "Android"} · ` : ""}build #${b.number} failed. The end of its log:`);
+  console.log(page.lines.slice(-count).map((l) => (l.stream === "stderr" ? pc.red(l.text) : pc.dim(l.text))).join("\n"));
+  p.log.info(`Whole log: ${pc.cyan(cmd(`liftbay builds logs ${b.number}`))}`);
 }
 
 /** Files `liftbay init` writes or changes; uncommitted, they're the setup the build would be missing. */
@@ -254,33 +352,9 @@ export async function build(opts: BuildOptions) {
     return { builds: started.map(summary) };
   }
 
-  // Follow every build; with more than one, prefix lines with the platform.
-  const prefix = started.length > 1;
-  const results = await Promise.all(
-    started.map(async (b) => {
-      let after = 0;
-      let phase: string | null = null;
-      for (;;) {
-        const page = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}/logs", { params: { path: { ...path, number: b.number }, query: { after } } }));
-        for (const l of page.lines) {
-          const tag = prefix ? pc.dim(`${b.platform.padEnd(8)}`) : "";
-          if (l.phase && l.phase !== phase) {
-            phase = l.phase;
-            console.log(`${tag}${pc.cyan(`==> ${phase}`)}`);
-          }
-          console.log(`${tag}${l.stream === "stderr" ? pc.red(l.text) : l.stream === "system" ? pc.dim(l.text) : l.text}`);
-        }
-        after = page.nextSeq;
-        if (page.complete) break;
-        if (!page.lines.length) {
-          const fresh = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } }));
-          if (FINISHED.has(fresh.status) && fresh.logLineCount <= after) break;
-          await sleep(2000);
-        }
-      }
-      return unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } }));
-    }),
-  );
+  // Like EAS: progress by default (each step as it finishes), the full log with --logs or `liftbay builds logs`.
+  const results = opts.logs ? await followLogs(lb, path, started) : await followSteps(lb, path, started);
+  for (const r of results.filter((r) => r.status === "failed")) await printLogTail(lb, path, r, started.length > 1);
 
   const out = [];
   for (const r of results) {
