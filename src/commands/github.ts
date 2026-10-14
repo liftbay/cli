@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { client, cmd, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
+import { client, cmd, dashboardUrl, fail, isInteractive, poll, unwrap } from "../context.ts";
 import { requireConfig, type LiftbayConfig } from "../project.ts";
 import { fit } from "../prompts.ts";
 import { cancelled } from "./link.ts";
@@ -37,7 +37,7 @@ async function waitFor(lb: Lb, config: LiftbayConfig, message: string, done: (s:
   const until = Date.now() + WAIT_MINUTES * 60_000;
   while (Date.now() < until) {
     await sleep(4000);
-    const s = await status(lb, config);
+    const s = await poll(() => status(lb, config));
     if (done(s)) {
       spin.stop(message.replace(/^Waiting for /, "Done: "));
       return s;
@@ -68,7 +68,7 @@ async function waitForInstall(lb: Lb, config: LiftbayConfig, attempt: string | u
   while (Date.now() < until) {
     await sleep(3000);
     const a = attempt
-      ? ((await lb.GET("/v1/orgs/{org}/github/install/{attempt}", { params: { path: { org: config.org, attempt } } })).data as Attempt | undefined)
+      ? ((await poll(() => lb.GET("/v1/orgs/{org}/github/install/{attempt}", { params: { path: { org: config.org, attempt } } }))).data as Attempt | undefined)
       : undefined;
     if (a && a.status !== last) {
       last = a.status;
@@ -78,7 +78,7 @@ async function waitForInstall(lb: Lb, config: LiftbayConfig, attempt: string | u
         return { ok: false, message: a.message };
       }
     }
-    const s = await status(lb, config);
+    const s = await poll(() => status(lb, config));
     if (s.connected) {
       spin.stop(`GitHub App installed for ${s.repo}`);
       return { ok: true, status: s };

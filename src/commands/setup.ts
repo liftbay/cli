@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { WORKFLOW_YAML } from "../generated/workflow.ts";
+import { currentWorkflow, WORKFLOW_PATH } from "../workflow.ts";
 import { CliError, client, cmd, dashboardUrl, disablePrompts, fail, isInteractive, unwrap } from "../context.ts";
 import { answersToOptions, initQuestions, readAnswers } from "./answers.ts";
 import { checkboxes } from "../prompts.ts";
@@ -158,7 +158,6 @@ async function githubStep(): Promise<GithubCheck | { error: string }> {
 /** What the last ciInit imported from eas.json, for the commands' JSON results. */
 let lastImport: ImportResult[] = [];
 
-const WORKFLOW_PATH = ".github/workflows/liftbay.yml";
 
 /** owner/name of the `origin` remote when it is on GitHub. */
 async function githubRepo(): Promise<string | null> {
@@ -172,14 +171,15 @@ async function githubRepo(): Promise<string | null> {
 
 /** The workflow Liftbay starts for every build. It must be committed on the branches you build. */
 async function writeWorkflow(opts: SetupOptions) {
+  const wanted = await currentWorkflow();
   const current = existsSync(WORKFLOW_PATH) ? readFileSync(WORKFLOW_PATH, "utf8") : null;
-  if (current === WORKFLOW_YAML) return;
+  if (current === wanted) return;
   if (current !== null) {
     const replace = opts.yes || (isInteractive() && cancelled(await p.confirm({ message: `${WORKFLOW_PATH} differs from the current Liftbay workflow. Replace it?` })));
     if (!replace) return p.log.info(`Kept your ${WORKFLOW_PATH}.`);
   }
   mkdirSync(dirname(WORKFLOW_PATH), { recursive: true });
-  writeFileSync(WORKFLOW_PATH, WORKFLOW_YAML);
+  writeFileSync(WORKFLOW_PATH, wanted);
   p.log.success(`Wrote ${pc.cyan(WORKFLOW_PATH)}. Commit and push it: Liftbay starts it for every build, on your GitHub Actions minutes.`);
   p.log.info(pc.dim("GitHub counts macOS minutes about 10× faster than Linux; on a private repo with GitHub Free that is roughly 10 iOS builds a month."));
 }

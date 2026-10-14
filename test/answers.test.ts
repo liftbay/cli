@@ -45,3 +45,21 @@ describe("init --answers", () => {
     expect(() => readAnswers(join(dir, "none.json"))).toThrow(/No answers file/);
   });
 });
+
+describe("following a build through network blips", () => {
+  it("retries a dropped connection and returns the answer", async () => {
+    const { poll, isTransient } = await import("../src/context.ts");
+    const dropped = Object.assign(new TypeError("fetch failed"), { cause: { code: "EADDRNOTAVAIL" } });
+    expect(isTransient(dropped)).toBe(true);
+    expect(isTransient(new Error("Not signed in"))).toBe(false);
+    let calls = 0;
+    const original = globalThis.setTimeout;
+    (globalThis as { setTimeout: unknown }).setTimeout = (f: () => void) => original(f, 0);
+    try {
+      expect(await poll(async () => (++calls < 3 ? Promise.reject(dropped) : "ok"))).toBe("ok");
+    } finally {
+      globalThis.setTimeout = original;
+    }
+    expect(calls).toBe(3);
+  });
+});

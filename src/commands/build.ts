@@ -2,7 +2,10 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import QRCode from "qrcode";
 import { execFileSync } from "node:child_process";
-import { client, cmd, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { currentWorkflow, WORKFLOW_PATH } from "../workflow.ts";
+import { client, cmd, dashboardUrl, fail, isInteractive, poll, unwrap } from "../context.ts";
 import { setUpIos } from "./credentials.ts";
 import { cancelled } from "./link.ts";
 import { requireConfig } from "../project.ts";
@@ -78,7 +81,7 @@ export async function followSteps(lb: Lb, path: ProjectPath, started: Build[]): 
     for (const b of started) {
       const prev = latest.get(b.number)!;
       if (FINISHED.has(prev.status)) continue;
-      const fresh = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } }));
+      const fresh = await poll(() => unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } })));
       latest.set(b.number, fresh);
       if (fresh.status !== "queued" && !runnerSeen.has(b.number)) {
         runnerSeen.add(b.number);
@@ -109,7 +112,7 @@ async function followLogs(lb: Lb, path: ProjectPath, started: Build[]): Promise<
       let after = 0;
       let phase: string | null = null;
       for (;;) {
-        const page = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}/logs", { params: { path: { ...path, number: b.number }, query: { after } } }));
+        const page = await poll(() => unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}/logs", { params: { path: { ...path, number: b.number }, query: { after } } })));
         for (const l of page.lines) {
           const tag = prefix ? pc.dim(`${b.platform.padEnd(8)}`) : "";
           if (l.phase && l.phase !== phase) {
@@ -121,12 +124,12 @@ async function followLogs(lb: Lb, path: ProjectPath, started: Build[]): Promise<
         after = page.nextSeq;
         if (page.complete) break;
         if (!page.lines.length) {
-          const fresh = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } }));
+          const fresh = await poll(() => unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } })));
           if (FINISHED.has(fresh.status) && fresh.logLineCount <= after) break;
           await sleep(2000);
         }
       }
-      return unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } }));
+      return poll(() => unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}", { params: { path: { ...path, number: b.number } } })));
     }),
   );
 }
@@ -145,7 +148,8 @@ async function printLogTail(lb: Lb, path: ProjectPath, b: Build, tagged: boolean
 const SETUP_FILES = ["liftbay.json", ".github/workflows/liftbay.yml", "app.json", "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "bun.lock", "bun.lockb"];
 
 function git(args: string[]) {
-  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  // trimEnd, not trim: `git status --porcelain` lines start with a space (" M file") that's part of the format.
+  return execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trimEnd();
 }
 
 /** Runs git with the terminal attached, so a push can ask for credentials. */
@@ -162,6 +166,21 @@ function gitLoud(args: string[]) {
  * offers to do both; otherwise it fails with the commands, so an agent can run them.
  */
 async function readyToBuild(branch: string, interactive: boolean) {
+  // The build runs the workflow file on this branch: missing or out of date, offer the current one first.
+  const wanted = await currentWorkflow();
+  const present = existsSync(WORKFLOW_PATH) ? readFileSync(WORKFLOW_PATH, "utf8") : null;
+  if (present !== wanted) {
+    const what = present === null ? `${WORKFLOW_PATH} isn't in this repository` : `${WORKFLOW_PATH} is out of date`;
+    if (!interactive) fail(`${what}. Update it with \`liftbay ci init --yes\`, then commit and push it.`);
+    p.log.warn(`${what}${present === null ? "" : " (Liftbay changed how builds run)"}.`);
+    if (cancelled(await p.confirm({ message: present === null ? "Add it?" : "Update it?", initialValue: true }))) {
+      mkdirSync(dirname(WORKFLOW_PATH), { recursive: true });
+      writeFileSync(WORKFLOW_PATH, wanted);
+      p.log.success(`${present === null ? "Added" : "Updated"} ${WORKFLOW_PATH}`);
+    } else if (present === null) {
+      fail(`Builds need ${WORKFLOW_PATH} on ${branch}. Run \`liftbay ci init\` to add it.`);
+    }
+  }
   const changed = git(["status", "--porcelain", "--", ...SETUP_FILES])
     .split("\n")
     .filter(Boolean)

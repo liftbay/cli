@@ -79,6 +79,32 @@ export const cmd = (command: string) => command.replace(/^liftbay\b/, cliName())
 /** The same for commands quoted inside a message: `liftbay login` → `npx liftbay login`. */
 export const withCliName = (text: string) => (cliName() === "liftbay" ? text : text.replace(/`liftbay /g, `\`${cliName()} `));
 
+/** A dropped connection or a server hiccup: worth retrying while following something that keeps running anyway. */
+export function isTransient(e: unknown): boolean {
+  if (e instanceof LiftbayApiError) return e.status >= 500 || e.status === 429;
+  const err = e as { name?: string; message?: string; code?: string; cause?: { code?: string } };
+  const code = err?.cause?.code ?? err?.code ?? "";
+  return (err?.name === "TypeError" && err.message === "fetch failed") || /^(ECONN|EADDR|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|ENETUNREACH|EHOSTUNREACH|UND_ERR)/.test(code);
+}
+
+/**
+ * Runs one poll of something that keeps going without us (a build, a submission, an install), retrying through
+ * network blips for up to five minutes instead of giving up: the build doesn't stop because a laptop's Wi-Fi did.
+ */
+export async function poll<T>(fn: () => Promise<T>, onRetry?: (attempt: number) => void): Promise<T> {
+  const until = Date.now() + 5 * 60_000;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!isTransient(e) || Date.now() > until) throw e;
+      if (attempt === 1) process.stderr.write(`${pc.yellow("!")} Connection to Liftbay lost; retrying…\n`);
+      onRetry?.(attempt);
+      await new Promise((r) => setTimeout(r, Math.min(15_000, 1000 * 2 ** Math.min(attempt, 4))));
+    }
+  }
+}
+
 /** Turns API errors into one readable line; everything else is a bug and keeps its stack. */
 export function reportError(e: unknown): never {
   if (json) {

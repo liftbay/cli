@@ -1,7 +1,7 @@
 import * as p from "@clack/prompts";
 import pc from "picocolors";
 import QRCode from "qrcode";
-import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
+import { client, cmd, fail, isInteractive, poll, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
 import { cancelled } from "./link.ts";
 
@@ -48,7 +48,7 @@ export async function deviceAdd(opts: { udid?: string; name?: string; teamId?: s
   const until = Date.parse(reg.expiresAt);
   while (Date.now() < until) {
     await sleep(2500);
-    const status = await unwrap(lb.GET("/v1/orgs/{org}/devices/registrations/{registration}", { params: { path: { ...org, registration: reg.id } } }));
+    const status = await poll(() => unwrap(lb.GET("/v1/orgs/{org}/devices/registrations/{registration}", { params: { path: { ...org, registration: reg.id } } })));
     if (status.device) {
       spin.stop(`Registered ${pc.bold(status.device.name)} ${pc.dim(`${status.device.model ?? ""} ${status.device.udid}`)}`);
       await nextStep(lb);

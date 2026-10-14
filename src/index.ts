@@ -15,7 +15,7 @@ import { githubConnect, githubStatus, githubWorkflow } from "./commands/github.t
 
 const program = new Command("liftbay")
   .description("Build, ship and update React Native apps")
-  .version("0.6.0")
+  .version("0.7.0")
   .option("--json", "print the result as JSON on stdout (progress goes to stderr; never prompts). Also LIFTBAY_JSON=1")
   .hook("preAction", () => {
     if (program.opts().json || process.env.LIFTBAY_JSON === "1") enableJson();
@@ -49,6 +49,8 @@ program
   .option("--dashboard-url <url>", "dashboard URL")
   .option("--no-open", "don't open the browser")
   .option("--no-wait", "start the sign-in and exit; run `liftbay login` again after approving to finish (for agents)")
+  .option("--email <address>", "sign in with a code sent to this email, in the terminal (creates the account the first time)")
+  .option("--code <code>", "with --email: the 6-digit code from the email")
   .action(wrap(login));
 program.command("logout").description("Sign out and remove the saved token").action(wrap(logout));
 program.command("whoami").description("Show the signed-in user and organizations").action(wrap(whoami));

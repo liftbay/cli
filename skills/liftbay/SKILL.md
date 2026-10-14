@@ -25,19 +25,24 @@ Check first:
 liftbay whoami --json
 ```
 
-If it fails with "Not signed in", use the browser sign-in in two steps:
+If it fails with "Not signed in", sign in with an email code, all in the terminal. This also creates the account if the person is new to Liftbay:
 
-```bash
-liftbay login --no-wait --json
-```
+1. Ask the person for their email address.
+2. Send the code:
+   ```bash
+   liftbay login --email <address> --json
+   ```
+   This returns `{"status": "code_sent", ...}`.
+3. Ask the person for the 6-digit code from that email.
+4. Sign in:
+   ```bash
+   liftbay login --email <address> --code <code> --json
+   ```
+   This returns `{"status": "signed_in", "user": {...}}`.
 
-This returns `{"status": "pending", "userCode": "ABCD-EFGH", "url": "https://liftbay.dev/device?code=ABCD-EFGH", ...}` and opens the browser on this machine. Give the user the `url` and `userCode`, and ask them to approve it and tell you when they're done. Then finish:
+A wrong code fails with `invalid_code`; ask again. Codes expire after a few minutes; send a new one with step 2. The token is saved in `~/.liftbay/credentials.json`, so later commands just work. While Liftbay's waitlist is on, only approved addresses can sign in; the error says so.
 
-```bash
-liftbay login --json
-```
-
-It returns `{"status": "signed_in", "user": {...}}`. The request expires after 10 minutes; if it does, start again. The token is saved in `~/.liftbay/credentials.json`, so later commands just work.
+The person can also approve in a browser instead: `liftbay login --no-wait --json` returns a `url` and `userCode` for them to approve, then `liftbay login --json` finishes.
 
 **CI or unattended agents:** set `LIFTBAY_TOKEN` to an organization API token instead. The user creates it at `https://liftbay.dev/<org>/tokens`, and it takes priority over the saved login.
 

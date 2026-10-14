@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import * as p from "@clack/prompts";
 import pc from "picocolors";
-import { client, cmd, dashboardUrl, fail, unwrap } from "../context.ts";
+import { client, cmd, dashboardUrl, fail, poll, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
 
 type Platform = "ios" | "android";
@@ -42,7 +42,7 @@ export async function submit(opts: SubmitOptions) {
     queued.map(async (s) => {
       let shown = 0;
       for (;;) {
-        const d = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/submissions/{submission}", { params: { path: { ...path, submission: s.id } } }));
+        const d = await poll(() => unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/submissions/{submission}", { params: { path: { ...path, submission: s.id } } })));
         for (const e of d.events.slice(shown)) p.log.message(`${pc.dim(s.platform.padEnd(8))}${e.text}`);
         shown = d.events.length;
         if (DONE.has(d.status)) return d;
