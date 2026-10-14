@@ -15,7 +15,7 @@ import { githubConnect, githubStatus, githubWorkflow } from "./commands/github.t
 
 const program = new Command("liftbay")
   .description("Build, ship and update React Native apps")
-  .version("0.5.0")
+  .version("0.5.1")
   .option("--json", "print the result as JSON on stdout (progress goes to stderr; never prompts). Also LIFTBAY_JSON=1")
   .hook("preAction", () => {
     if (program.opts().json || process.env.LIFTBAY_JSON === "1") enableJson();
@@ -36,7 +36,7 @@ const setupOptions = (cmd: Command) =>
     .option("--project <slug>", "project slug (created if it doesn't exist)")
     .option("--platforms <list>", "ios, android or all")
     .option("--runtime-policy <policy>", "appVersion or fingerprint")
-    .option("--ios-engine <engine>", "where iOS builds run: github-actions or xcode-cloud")
+    .option("--ios-engine <engine>", "project setting: where iOS store builds run, github-actions or xcode-cloud")
     .option("--no-eas", "don't use eas.json's build profiles and env, even if there is one")
     .option("-y, --yes", "accept defaults, no prompts")
     .option("--api-url <url>", "API URL (for self-hosted or local development)")
@@ -69,7 +69,7 @@ program
   .option("--no-wait", "queue and exit without following the logs")
   .option("--submit", "submit store builds when they succeed: TestFlight, or a Google Play track")
   .option("--track <track>", "Play track for --submit: internal, alpha, beta or production")
-  .option("--engine <engine>", "where iOS builds run: github-actions or xcode-cloud (default: build.iosEngine in liftbay.json; asked in a terminal)")
+  .option("--engine <engine>", "where this iOS store build runs: github-actions or xcode-cloud (asked in a terminal; otherwise the project's setting)")
   .action(wrap(build));
 
 const builds = program.command("builds").description("Look at builds: list, status, logs, artifacts");

@@ -48,24 +48,25 @@ export async function ciInit(app: DetectedApp, config: LiftbayConfig, opts: Setu
           );
   }
 
-  // Where iOS builds run. Both use the customer's own minutes or hours; Xcode Cloud needs a one-time setup.
+  // Where iOS store builds run by default: a project setting, so builds started from the CLI, an agent or a
+  // git push all follow it. Both use the customer's own minutes or hours; Xcode Cloud needs a one-time setup.
   let iosEngine: IosEngine | undefined = opts.iosEngine as IosEngine | undefined;
   if (iosEngine && iosEngine !== "github-actions" && iosEngine !== "xcode-cloud") fail("--ios-engine must be github-actions or xcode-cloud");
   if (platforms.includes("ios") && !iosEngine) {
+    const current = (await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}", { params: { path: { org: config.org, project: config.project } } }))).iosEngine;
     iosEngine =
-      config.build?.iosEngine ??
-      (opts.yes || !isInteractive()
-        ? "github-actions"
+      opts.yes || !isInteractive()
+        ? (current ?? "github-actions")
         : cancelled(
             await p.select({
-              message: "Where should iOS builds run?",
+              message: "Where should iOS store builds run? (you can pick for each build too)",
               options: [
                 { value: "github-actions" as const, label: "GitHub Actions", hint: "macOS runners on your GitHub minutes; ready now" },
                 { value: "xcode-cloud" as const, label: "Xcode Cloud", hint: "store builds, 25 free hours a month with the Apple Developer Program; one-time setup after iOS signing" },
               ],
-              initialValue: "github-actions" as const,
+              initialValue: current ?? ("github-actions" as const),
             }),
-          ));
+          );
   }
 
   if (platforms.includes("ios") && !app.bundleId) p.log.warn(`No iOS bundle identifier found. Set ${pc.cyan("expo.ios.bundleIdentifier")} in app.json before the first iOS build.`);
@@ -117,12 +118,13 @@ export async function ciInit(app: DetectedApp, config: LiftbayConfig, opts: Setu
 
   const profiles = Object.fromEntries(Object.entries(base).map(([name, prof]) => [name, { ...prof, platforms }]));
   // Triggers are opt-in (docs: /docs/builds/triggers); keep any the project already has.
-  const next: LiftbayConfig = { ...config, build: { profiles, triggers: config.build?.triggers ?? [], ...(iosEngine ? { iosEngine } : {}) } };
+  if (iosEngine) await unwrap(lb.PATCH("/v1/orgs/{org}/projects/{project}", { params: { path }, body: { iosEngine } }));
+  const next: LiftbayConfig = { ...config, build: { profiles, triggers: config.build?.triggers ?? [] } };
   writeConfig(next);
   p.note(
     Object.entries(profiles)
       .map(([name, prof]) => `${pc.bold(name.padEnd(12))} env ${prof.environment.padEnd(12)} ${prof.distribution === "store" ? "store" : "internal"} · ${prof.platforms.join(", ")}`)
-      .join("\n") + (iosEngine ? `\n\niOS builds run on ${iosEngine === "xcode-cloud" ? "Xcode Cloud" : "GitHub Actions"}` : ""),
+      .join("\n") + (iosEngine ? `\n\niOS store builds run on ${iosEngine === "xcode-cloud" ? "Xcode Cloud" : "GitHub Actions"} (project setting)` : ""),
     "Build profiles",
   );
   if (iosEngine === "xcode-cloud") {

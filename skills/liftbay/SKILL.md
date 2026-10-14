@@ -60,7 +60,7 @@ Useful flags:
 
 To set up one part on its own, use `liftbay ci init --yes --json` (builds) or `liftbay ota init --yes --json` (OTA).
 
-Pass `--ios-engine github-actions|xcode-cloud` for where iOS **store** builds run; it's saved as `build.iosEngine` in `liftbay.json`. Xcode Cloud uses the Apple team's free hours, and needs iOS signing and `liftbay xcode-cloud connect` first. Internal (ad hoc) and simulator builds always run on GitHub Actions.
+`--ios-engine github-actions|xcode-cloud` sets a **project setting**: where iOS **store** builds run unless a build picks. Builds you start without `--engine`, and every build started by a git push, use it. It's also in the dashboard's project settings. Xcode Cloud uses the Apple team's free hours, and needs iOS signing and `liftbay xcode-cloud connect` first; until it's connected (or when it's out of hours), those builds fall back to GitHub Actions and say so in the log. Internal (ad hoc) and simulator builds always run on GitHub Actions.
 
 Then get GitHub ready. Builds start the workflow through the Liftbay GitHub App:
 
@@ -159,7 +159,7 @@ Statuses: `queued` → `preparing` → `running` → `uploading` → `succeeded`
 Other flags:
 - `--ref <branch|tag|sha>`: defaults to the current branch, which must be pushed.
 - `--simulator`: unsigned iOS simulator build; needs no Apple account.
-- `--engine github-actions|xcode-cloud`: overrides `build.iosEngine` for this build (Xcode Cloud: iOS store builds only)
+- `--engine github-actions|xcode-cloud`: for this build only, instead of the project's setting (Xcode Cloud: iOS store builds only)
 - `-m "message"`
 
 **Xcode Cloud (optional):** `liftbay xcode-cloud connect --json`. Its error says which one-time step the user has to do in App Store Connect.

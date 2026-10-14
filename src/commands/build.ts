@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { client, cmd, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
 import { setUpIos } from "./credentials.ts";
 import { cancelled } from "./link.ts";
-import { requireConfig, writeConfig } from "../project.ts";
+import { requireConfig } from "../project.ts";
 import { ensureGithub } from "./github.ts";
 import type { components } from "@liftbay/sdk";
 
@@ -113,7 +113,7 @@ async function readyToBuild(branch: string, interactive: boolean) {
  * pushed and GitHub is ready, so a build never fails for setup reasons it could have caught here.
  */
 export async function build(opts: BuildOptions) {
-  let config = requireConfig();
+  const config = requireConfig();
   const lb = client();
   const interactive = isInteractive();
   const path = { org: config.org, project: config.project };
@@ -167,25 +167,27 @@ export async function build(opts: BuildOptions) {
   // 3. Where iOS builds run
   // Xcode Cloud makes iOS store builds only; internal (ad hoc) and simulator builds always run on GitHub Actions.
   const storeIos = platforms.includes("ios") && !opts.simulator && profile.distribution === "store";
-  let iosEngine: Engine = (opts.engine as Engine | undefined) ?? config.build?.iosEngine ?? "auto";
+  // `auto` lets the server follow the project's setting; a terminal asks for this build, defaulting to it.
+  let iosEngine: Engine = (opts.engine as Engine | undefined) ?? "auto";
   if (!storeIos && iosEngine === "xcode-cloud") {
-    if (opts.engine === "xcode-cloud") fail(`Xcode Cloud makes iOS store builds only; profile "${profileName}" is ${opts.simulator ? "a simulator" : `an ${profile.distribution}`} build. Use a store profile, or --engine github-actions.`);
-    iosEngine = "github-actions";
+    fail(`Xcode Cloud makes iOS store builds only; profile "${profileName}" is ${opts.simulator ? "a simulator" : `an ${profile.distribution}`} build. Use a store profile, or --engine github-actions.`);
   }
   if (storeIos) {
-    if (!opts.engine && !config.build?.iosEngine && interactive) {
+    if (!opts.engine && interactive) {
+      const setting = (await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}", { params: { path } }))).iosEngine ?? "github-actions";
+      const label = (e: string) => (e === "xcode-cloud" ? "Xcode Cloud" : "GitHub Actions");
       iosEngine = cancelled(
         await p.select({
-          message: "Where should iOS builds run?",
-          options: [
-            { value: "github-actions" as const, label: "GitHub Actions", hint: "macOS runners on your GitHub minutes" },
-            { value: "xcode-cloud" as const, label: "Xcode Cloud", hint: "25 free hours a month with the Apple Developer Program" },
-          ],
+          message: "Where should this iOS build run?",
+          options: (["github-actions", "xcode-cloud"] as const).map((e) => ({
+            value: e,
+            label: label(e),
+            hint: [e === setting ? "project default" : "", e === "xcode-cloud" ? "25 free hours a month with the Apple Developer Program" : "macOS runners on your GitHub minutes"].filter(Boolean).join(" · "),
+          })),
+          initialValue: setting,
         }),
       );
-      config = { ...config, build: { ...config.build!, iosEngine } };
-      writeConfig(config);
-      p.log.info(pc.dim("Saved in liftbay.json (commit it). Override once with --engine."));
+      if (iosEngine !== setting) p.log.info(pc.dim(`Just this build. Change the project default in the dashboard's project settings, or with ${cmd("liftbay ci init --ios-engine " + iosEngine)}.`));
     }
     if (iosEngine === "xcode-cloud") {
       const xc = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/xcode-cloud", { params: { path } }));

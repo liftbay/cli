@@ -31,8 +31,6 @@ export type LiftbayConfig = {
     profiles: Record<string, BuildProfile>;
     /** Builds started by git events through the GitHub App. See https://liftbay.dev/docs/builds/triggers */
     triggers?: { on: "push" | "pull_request" | "tag"; branches?: string[]; tags?: string[]; profile: string; platforms?: ("ios" | "android")[]; submit?: boolean }[];
-    /** Where iOS builds run unless `--engine` says otherwise: GitHub Actions macOS runners, or the team's Xcode Cloud. */
-    iosEngine?: IosEngine;
   };
   updates?: { client: "expo-updates"; runtimeVersion: { policy: "appVersion" | "fingerprint" } };
 };
