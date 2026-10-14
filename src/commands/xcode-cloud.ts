@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
+import { fit } from "../prompts.ts";
 
 type ConnectOptions = { teamId?: string; workspace?: string; scheme?: string; wait?: boolean };
 type Status = { connected: boolean; step: string; message: string; actionUrl: string | null; workspacePath: string | null; scheme: string | null; hours: { usedThisMonth: number; included: number } | null };
@@ -41,7 +42,7 @@ export async function xcodeCloudConnect(opts: ConnectOptions) {
     last = s.step;
     if (!wait || s.step === "apple_key") fail(s.step === "apple_key" ? s.message : "Not connected yet. Run this again once the step above is done.");
     const spin = p.spinner();
-    spin.start("Waiting for that step (checking every 10 seconds; Ctrl-C to stop)");
+    spin.start(fit("Waiting for that step (checking every 10 seconds)"));
     await sleep(10_000);
     spin.stop("Checking again");
   }

@@ -8,6 +8,7 @@ import pc from "picocolors";
 import { client, dashboardUrl, fail, unwrap } from "../context.ts";
 import { expoConfig, output, requireConfig, run } from "../project.ts";
 import { loadPrivateKey, signDraft } from "./signing.ts";
+import { fit } from "../prompts.ts";
 
 type Platform = "ios" | "android";
 type ExportedFile = { path: string; abs: string; sha256: string; sizeBytes: number; contentType: string };
@@ -103,7 +104,7 @@ export async function publish(opts: { channel?: string; profile?: string; messag
     let done = 0;
     for (const m of prep.missing) {
       const f = bySha.get(m.sha256)!;
-      spin.message(`Uploading ${++done}/${prep.missing.length}: ${f.path}`);
+      spin.message(fit(`Uploading ${++done}/${prep.missing.length}: ${f.path}`));
       const res = await fetch(m.uploadUrl, { method: "PUT", body: readFileSync(f.abs), headers: { "Content-Type": f.contentType } });
       if (!res.ok) fail(`Upload failed for ${f.path} (${res.status})`);
     }

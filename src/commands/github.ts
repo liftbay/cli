@@ -3,6 +3,7 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { client, cmd, dashboardUrl, fail, isInteractive, unwrap } from "../context.ts";
 import { requireConfig, type LiftbayConfig } from "../project.ts";
+import { fit } from "../prompts.ts";
 import { cancelled } from "./link.ts";
 
 type Lb = ReturnType<typeof client>;
@@ -32,7 +33,7 @@ async function status(lb: Lb, config: LiftbayConfig, refresh = true): Promise<St
 /** Polls until `done(status)`, with a spinner. Returns the last status, or null if it timed out. */
 async function waitFor(lb: Lb, config: LiftbayConfig, message: string, done: (s: Status) => boolean): Promise<Status | null> {
   const spin = p.spinner();
-  spin.start(`${message} ${pc.dim("(Ctrl-C to stop)")}`);
+  spin.start(fit(message));
   const until = Date.now() + WAIT_MINUTES * 60_000;
   while (Date.now() < until) {
     await sleep(4000);
@@ -54,7 +55,14 @@ type Attempt = { status: "waiting" | "needs_sign_in" | "wrong_account" | "connec
  */
 async function waitForInstall(lb: Lb, config: LiftbayConfig, attempt: string | undefined): Promise<{ ok: true; status: Status } | { ok: false; message: string }> {
   const spin = p.spinner();
-  spin.start(`Waiting for the GitHub App to be installed ${pc.dim("(Ctrl-C to stop)")}`);
+  spin.start(fit("Waiting for the GitHub App to be installed"));
+  /** Explains a change above the spinner: spinner text has to stay on one line. */
+  const explain = (text: string, spinnerText: string) => {
+    spin.stop(pc.dim("…"));
+    p.log.info(text);
+    spin.start(fit(spinnerText));
+  };
+  let noRepoAccessShown = false;
   const until = Date.now() + WAIT_MINUTES * 60_000;
   let last: Attempt["status"] = "waiting";
   while (Date.now() < until) {
@@ -64,7 +72,7 @@ async function waitForInstall(lb: Lb, config: LiftbayConfig, attempt: string | u
       : undefined;
     if (a && a.status !== last) {
       last = a.status;
-      if (a.status === "needs_sign_in") spin.message(`GitHub is done. Sign in to Liftbay in that browser to finish linking ${pc.dim("(Ctrl-C to stop)")}`);
+      if (a.status === "needs_sign_in") explain("GitHub is done. Sign in to Liftbay in that browser to finish linking.", "Waiting for you to sign in to Liftbay in the browser");
       else if (a.status !== "waiting" && a.status !== "connected") {
         spin.error("GitHub didn't connect");
         return { ok: false, message: a.message };
@@ -76,7 +84,10 @@ async function waitForInstall(lb: Lb, config: LiftbayConfig, attempt: string | u
       return { ok: true, status: s };
     }
     if (a?.status === "connected") {
-      spin.message(`Installed on ${s.repo!.split("/")[0]}, but without access to ${s.repo}: on GitHub, Configure the app and select the repository ${pc.dim("(Ctrl-C to stop)")}`);
+      if (!noRepoAccessShown) {
+        noRepoAccessShown = true;
+        explain(`Installed on ${s.repo!.split("/")[0]}, but without access to ${s.repo}. On GitHub, Configure the app and select the repository.`, "Waiting for access to the repository");
+      }
     }
   }
   spin.error("Stopped waiting");

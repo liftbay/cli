@@ -3,6 +3,17 @@ import pc from "picocolors";
 
 type Option<T> = { value: T; label: string; hint?: string };
 
+/**
+ * Spinner text must fit on one line: a spinner redraws only its own line, so text that wraps leaves a copy of
+ * itself on screen every frame. Long explanations go in a log line instead; this trims what's left.
+ */
+export function fit(text: string, reserve = 8): string {
+  const width = Math.max(20, (process.stdout.columns || 80) - reserve);
+  // Measure without colour codes; cut (and drop colours) only when it doesn't fit.
+  const plain = text.replace(/\x1b\[[0-9;]*m/g, "");
+  return plain.length <= width ? text : `${plain.slice(0, width - 1)}…`;
+}
+
 const symbol = (state: State) =>
   state === "submit" ? pc.green("◇") : state === "cancel" ? pc.red("■") : state === "error" ? pc.yellow("▲") : pc.cyan("◆");
 
