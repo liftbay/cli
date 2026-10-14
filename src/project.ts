@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { spinner } from "@clack/prompts";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -138,8 +139,7 @@ export async function run(cmd: string, args: string[], cwd = process.cwd(), env:
  * if it fails. npm's audit and funding notes are about the app's whole dependency tree, not this step.
  */
 export async function runQuiet(label: string, cmd: string, args: string[], cwd = process.cwd()) {
-  const p = await import("@clack/prompts");
-  const spin = p.spinner();
+  const spin = spinner();
   spin.start(label);
   const lines: string[] = [];
   const code = await new Promise<number | null>((resolve, reject) => {
