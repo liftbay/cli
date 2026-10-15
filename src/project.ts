@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fail } from "./context.ts";
+import { fail, jsonMode } from "./context.ts";
 
 export const CONFIG_FILE = "liftbay.json";
 
@@ -125,7 +125,8 @@ export async function detectApp(cwd = process.cwd()): Promise<DetectedApp> {
 
 export async function run(cmd: string, args: string[], cwd = process.cwd(), env: Record<string, string> = {}) {
   const code = await new Promise<number | null>((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd, stdio: "inherit", env: { ...process.env, ...env } });
+    // With --json, stdout carries only the result: the command's own output goes to stderr.
+    const child = spawn(cmd, args, { cwd, stdio: ["inherit", jsonMode() ? 2 : "inherit", "inherit"], env: { ...process.env, ...env } });
     child.on("error", reject);
     child.on("close", resolve);
   });

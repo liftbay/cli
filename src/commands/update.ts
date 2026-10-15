@@ -7,6 +7,7 @@ import * as p from "@clack/prompts";
 import pc from "picocolors";
 import { client, dashboardUrl, fail, unwrap } from "../context.ts";
 import { expoConfig, output, requireConfig, run } from "../project.ts";
+import { parseEnv } from "./env.ts";
 import { loadPrivateKey, signDraft } from "./signing.ts";
 import { fit } from "../prompts.ts";
 
@@ -33,9 +34,9 @@ function file(dir: string, rel: string, virtualPath: string, contentType: string
 }
 
 /** Runs `expo export` and turns its metadata.json into one file list per platform. */
-async function exportBundles(platforms: Platform[]) {
+async function exportBundles(platforms: Platform[], env: Record<string, string>) {
   const out = mkdtempSync(join(tmpdir(), "liftbay-export-"));
-  await run("npx", ["expo", "export", "--output-dir", out, "--dump-assetmap", ...platforms.flatMap((pl) => ["--platform", pl])]);
+  await run("npx", ["expo", "export", "--output-dir", out, "--dump-assetmap", ...platforms.flatMap((pl) => ["--platform", pl])], process.cwd(), env);
   const meta = JSON.parse(readFileSync(join(out, "metadata.json"), "utf8")) as {
     fileMetadata: Record<Platform, { bundle: string; assets: { path: string; ext: string }[] }>;
   };
@@ -47,6 +48,19 @@ async function exportBundles(platforms: Platform[]) {
     bundles[pl] = { launchAsset: m.bundle, files };
   }
   return { out, bundles };
+}
+
+/**
+ * The variables of the channel's environment, so an update is bundled with what its builds were built with
+ * (like EAS Update's --environment). Secret values never leave Liftbay; the bundle shouldn't need them.
+ * They take precedence over the local .env files, which Expo loads only for variables not already set.
+ */
+async function channelEnv(lb: ReturnType<typeof client>, path: { org: string; project: string }, channel: string) {
+  const list = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/channels", { params: { path } }));
+  const slug = list.find((c) => c.name === channel)?.environmentSlug;
+  if (!slug) return { slug: null, vars: {} as Record<string, string> };
+  const content = String(await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/environments/{env}/export", { params: { path: { ...path, env: slug } }, parseAs: "text" })));
+  return { slug, vars: Object.fromEntries(parseEnv(content).vars.map((v) => [v.key, v.value])) };
 }
 
 /** The runtime version each platform's binary reports, resolved by expo-updates itself. */
@@ -83,8 +97,11 @@ export async function publish(opts: { channel?: string; profile?: string; messag
 
   p.intro(pc.bgCyan(pc.black(" liftbay update publish ")));
   if (!platforms.every((x) => x === "ios" || x === "android")) fail("--platform must be ios, android or all");
+  const env = await channelEnv(lb, path, channel);
+  const names = Object.keys(env.vars);
+  if (env.slug) p.log.info(`Variables from the ${pc.bold(env.slug)} environment${names.length ? `: ${names.join(", ")}` : ": none set"}`);
   p.log.step(`Exporting ${platforms.join(" and ")} bundles`);
-  const { out, bundles } = await exportBundles(platforms);
+  const { out, bundles } = await exportBundles(platforms, env.vars);
   try {
     // Group platforms by runtime version: each group is one release.
     const groups = new Map<string, Platform[]>();
