@@ -136,6 +136,23 @@ async function followLogs(lb: Lb, path: ProjectPath, started: Build[]): Promise<
 }
 
 /** Every line of a build's log, page by page (a few thousand lines for a typical build). */
+type LinkBuild = { number: number; platform: string; distributionKind?: string; artifacts: { kind: string; status: string }[] };
+
+/**
+ * The link to a finished build: an install page for an ad hoc .ipa or an .apk (open it on the phone, or scan
+ * its QR code), a download page for anything else. Null when the build has no app.
+ */
+export async function installLink(lb: ReturnType<typeof client>, path: { org: string; project: string }, b: LinkBuild) {
+  const ready = new Set(b.artifacts.filter((a) => a.status === "ready").map((a) => a.kind));
+  if (!["ipa", "apk", "aab", "app"].some((k) => ready.has(k))) return null;
+  const link = await lb.POST("/v1/orgs/{org}/projects/{project}/builds/{number}/install-link", { params: { path: { ...path, number: b.number } } });
+  if (!link.data) return null;
+  const adhoc = ready.has("ipa") && b.distributionKind === "internal";
+  const apk = !ready.has("ipa") && ready.has("apk");
+  const label = adhoc ? "Install on a registered iPhone" : apk ? "Install on an Android phone" : "Download";
+  return { url: link.data.url, label, phone: adhoc || apk };
+}
+
 export async function fetchLog(lb: Lb, path: ProjectPath, number: number, limit = 50_000) {
   const lines: { text: string; stream: string; phase: string | null }[] = [];
   let after = 0;
@@ -408,14 +425,11 @@ export async function build(opts: BuildOptions) {
     for (const a of r.artifacts.filter((a) => a.status === "ready")) {
       p.log.message(`  ${a.name} ${pc.dim(`(${(a.sizeBytes / 1024 / 1024).toFixed(1)} MB)`)}`);
     }
-    // Internal (ad hoc) iOS builds: the page testers open on a registered iPhone to install it.
-    if (r.status === "succeeded" && r.platform === "ios" && r.artifacts.some((a) => a.kind === "ipa" && a.status === "ready")) {
-      const link = await lb.POST("/v1/orgs/{org}/projects/{project}/builds/{number}/install-link", { params: { path: { ...path, number: r.number } } });
-      if (link.data) {
-        installUrl = link.data.url;
-        p.log.message(`  Install on a registered device: ${pc.cyan(link.data.url)}`);
-        p.log.message((await QRCode.toString(link.data.url, { type: "terminal", small: true })).trimEnd());
-      }
+    if (r.status === "succeeded") {
+      const link = await installLink(lb, path, r);
+      installUrl = link?.url ?? null;
+      if (link) p.log.message(`  ${link.label}: ${pc.cyan(link.url)}`);
+      if (link?.phone) p.log.message((await QRCode.toString(link.url, { type: "terminal", small: true })).trimEnd());
     }
     out.push({ ...summary(r), durationSec: r.durationSec, artifacts: r.artifacts, installUrl, ...(reasons.has(r.number) ? { failure: reasons.get(r.number) } : {}) });
   }

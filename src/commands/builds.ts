@@ -6,7 +6,7 @@ import pc from "picocolors";
 import { client, cmd, dashboardUrl, fail, jsonMode, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
 import { whyItFailed } from "../failure.ts";
-import { fetchLog } from "./build.ts";
+import { fetchLog, installLink } from "./build.ts";
 
 const FINISHED = new Set(["succeeded", "failed", "cancelled"]);
 const STATUSES = ["queued", "preparing", "running", "uploading", "succeeded", "failed", "cancelled"] as const;
@@ -55,13 +55,10 @@ export async function buildsView(number: string) {
   if (b.message) console.log(pc.dim(b.message));
   for (const ph of b.phases) console.log(`  ${statusColor(ph.status).padEnd(20)} ${ph.name} ${pc.dim(duration(ph.durationSec ?? null))}`);
   for (const a of b.artifacts) console.log(`  ${a.kind.padEnd(6)} ${a.name} ${pc.dim(`${(a.sizeBytes / 1024 / 1024).toFixed(1)} MB · ${a.status}`)}`);
-  // Internal (ad hoc) iOS builds install from a page opened on a registered device.
-  let installUrl: string | null = null;
-  if (b.status === "succeeded" && b.platform === "ios" && b.artifacts.some((a) => a.kind === "ipa" && a.status === "ready")) {
-    const link = await client().POST("/v1/orgs/{org}/projects/{project}/builds/{number}/install-link", { params: { path: { ...path, number: b.number } } });
-    installUrl = link.data?.url ?? null;
-    if (installUrl) console.log(`  Install on a registered device: ${pc.cyan(installUrl)}`);
-  }
+  // A finished build: the page to install it on a phone, or to download it.
+  const link = b.status === "succeeded" ? await installLink(client(), path, b) : null;
+  if (link) console.log(`  ${link.label}: ${pc.cyan(link.url)}`);
+  const installUrl = link?.url ?? null;
   // A failed build: why, in its build tool's own words (agents read this from --json).
   let failure: string[] | undefined;
   if (b.status === "failed") {

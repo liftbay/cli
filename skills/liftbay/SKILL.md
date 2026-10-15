@@ -169,7 +169,7 @@ Always pass `--platform` and `--profile`. In a terminal the CLI asks for anythin
 The result is `{"builds": [{"number": 12, "platform": "ios", "status": "queued", "url": ...}]}`. Without `--no-wait`, `build` shows each finished step and, when a build fails, the end of its log. `--logs` streams the whole log instead. Builds take about 5–40 minutes, iOS longer. Check progress:
 
 ```bash
-liftbay builds view 12 --json             # status, phases, artifacts; installUrl for ad hoc iOS builds
+liftbay builds view 12 --json             # status, phases, artifacts; installUrl once it succeeded
 liftbay builds logs 12 --tail 200 --json  # the end of the log, to explain a failure
 liftbay builds list --status failed --json
 liftbay builds download 12 --out ./artifacts --json
@@ -177,6 +177,8 @@ liftbay builds cancel 12 --json
 ```
 
 Statuses: `queued` → `preparing` → `running` → `uploading` → `succeeded` | `failed` | `cancelled`. When a build fails, `liftbay builds view <n> --json` (and the result of a `build` you followed) has `failure`: the lines where the build tool itself said what went wrong (Gradle's "What went wrong", Xcode's `error:` lines, npm's errors). Read those first, explain them to the person, and fix what you can. Use `builds logs <n> --tail 200` when you need more context. A common one after moving from EAS: a tool like Sentry needs a secret (`SENTRY_AUTH_TOKEN`) that isn't in the environment yet.
+
+When a build succeeds, give the person its `installUrl` (in `build --json` and `builds view <n> --json`). It's a page that works for 30 days, for anyone with the link: an Android APK downloads and installs from it, an ad hoc iOS build installs on a registered device, and other builds (`.aab`, App Store `.ipa`) download.
 
 Other flags:
 - `--ref <branch|tag|sha>`: defaults to the current branch, which must be pushed.
