@@ -176,7 +176,7 @@ liftbay builds download 12 --out ./artifacts --json
 liftbay builds cancel 12 --json
 ```
 
-Statuses: `queued` → `preparing` → `running` → `uploading` → `succeeded` | `failed` | `cancelled`. When a build fails, read the last lines of the log. The reason is usually at the end: a dependency, native build or signing error, or a missing workflow file or GitHub App.
+Statuses: `queued` → `preparing` → `running` → `uploading` → `succeeded` | `failed` | `cancelled`. When a build fails, `liftbay builds view <n> --json` (and the result of a `build` you followed) has `failure`: the lines where the build tool itself said what went wrong (Gradle's "What went wrong", Xcode's `error:` lines, npm's errors). Read those first, explain them to the person, and fix what you can. Use `builds logs <n> --tail 200` when you need more context. A common one after moving from EAS: a tool like Sentry needs a secret (`SENTRY_AUTH_TOKEN`) that isn't in the environment yet.
 
 Other flags:
 - `--ref <branch|tag|sha>`: defaults to the current branch, which must be pushed.

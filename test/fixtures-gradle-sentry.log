@@ -1,0 +1,156 @@
+> Task :expo-manifests:bundleLibRuntimeToDirRelease
+> Task :expo-json-utils:bundleLibRuntimeToDirRelease
+> Task :expo-share-intent:bundleLibRuntimeToDirRelease
+> Task :expo-structured-headers:bundleLibRuntimeToDirRelease
+> Task :expo-updates-interface:bundleLibRuntimeToDirRelease
+> Task :react-native-worklets:writeReleaseAarMetadata
+> Task :app:checkReleaseAarMetadata
+!   INFO    2026-10-14 13:23:41.169895555 +00:00 Loaded file referenced by SENTRY_PROPERTIES (/home/runner/work/app/app/android/sentry.properties)
+
+> Task :app:createBundleReleaseJsAndAssets_SentryUpload_com.example.app@1.0.0+1_1
+Copy `debugId` from packager source map to Hermes source map...
+Done.
+Check generated source map for Debug ID: 00000000-0000-0000-0000-000000000000
+
+Sentry Source Maps upload will include the release name and dist.
+Sentry-CLI arguments: [/home/runner/work/app/app/node_modules/@sentry/cli/bin/sentry-cli, react-native, gradle, --bundle, /home/runner/work/app/app/android/app/build/generated/assets/react/release/index.android.bundle, --sourcemap, /home/runner/work/app/app/android/app/build/generated/sourcemaps/react/release/index.android.bundle.map, --release, com.example.app@1.0.0+1, --dist, 1]
+Processing react-native sourcemaps for Sentry upload.
+> Analyzing 2 sources
+! > Analyzing completed in 0.045s
+> Rewriting sources
+> Adding source map references
+
+> Task :app:createBundleReleaseJsAndAssets_SentryUpload_com.example.app@1.0.0+1_1 FAILED
+! > Rewriting completed in 0.58s
+! error: Auth token is required for this request. Please run `sentry-cli login` and try again!
+! 
+! Add --log-level=[info|debug] or export SENTRY_LOG_LEVEL=[info|debug] to see more output.
+! Please attach the full debug log to all bug reports.
+> Task :app:createBundleReleaseJsAndAssets_SentryUploadCleanUp SKIPPED
+! 
+! FAILURE: Build failed with an exception.
+! 
+! * Where:
+! Script '/home/runner/work/app/app/node_modules/@sentry/react-native/sentry.gradle' line: 132
+! 
+! * What went wrong:
+! Execution failed for task ':app:createBundleReleaseJsAndAssets_SentryUpload_com.example.app@1.0.0+1_1'.
+! > Process 'command '/home/runner/work/app/app/node_modules/@sentry/cli/bin/sentry-cli'' finished with non-zero exit value 1
+! 
+! * Try:
+! > Run with --info or --debug option to get more log output.
+! > Run with --scan to generate a Build Scan (Powered by Develocity).
+! > Get more help at https://help.gradle.org.
+! 
+! * Exception is:
+! org.gradle.api.tasks.TaskExecutionException: Execution failed for task ':app:createBundleReleaseJsAndAssets_SentryUpload_com.example.app@1.0.0+1_1'.
+! 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.lambda$executeIfValid$1(ExecuteActionsTaskExecuter.java:135)
+! 	at org.gradle.internal.Try$Failure.ifSuccessfulOrElse(Try.java:288)
+! 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.executeIfValid(ExecuteActionsTaskExecuter.java:133)
+! 	at org.gradle.api.internal.tasks.execution.ExecuteActionsTaskExecuter.execute(ExecuteActionsTaskExecuter.java:121)
+! 	at org.gradle.api.internal.tasks.execution.ProblemsTaskPathTrackingTaskExecuter.execute(ProblemsTaskPathTrackingTaskExecuter.java:41)
+
+[Incubating] Problems report is available at: file:///home/runner/work/app/app/android/build/reports/problems/problems-report.html
+! 	at org.gradle.api.internal.tasks.execution.FinalizePropertiesTaskExecuter.execute(FinalizePropertiesTaskExecuter.java:46)
+! 	at org.gradle.api.internal.tasks.execution.ResolveTaskExecutionModeExecuter.execute(ResolveTaskExecutionModeExecuter.java:51)
+! 	at org.gradle.api.internal.tasks.execution.SkipTaskWithNoActionsExecuter.execute(SkipTaskWithNoActionsExecuter.java:57)
+! 	at org.gradle.api.internal.tasks.execution.SkipOnlyIfTaskExecuter.execute(SkipOnlyIfTaskExecuter.java:74)
+! 	at org.gradle.api.internal.tasks.execution.CatchExceptionTaskExecuter.execute(CatchExceptionTaskExecuter.java:36)
+! 	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.executeTask(EventFiringTaskExecuter.java:77)
+! 	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:55)
+! 	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter$1.call(EventFiringTaskExecuter.java:52)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
+! 	at org.gradle.api.internal.tasks.execution.EventFiringTaskExecuter.execute(EventFiringTaskExecuter.java:52)
+! 	at org.gradle.execution.plan.LocalTaskNodeExecutor.execute(LocalTaskNodeExecutor.java:45)
+! 	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:347)
+! 	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$InvokeNodeExecutorsAction.execute(DefaultTaskExecutionGraph.java:334)
+! 	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.lambda$execute$0(DefaultTaskExecutionGraph.java:330)
+! 	at org.gradle.internal.operations.CurrentBuildOperationRef.with(CurrentBuildOperationRef.java:84)
+! 	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:330)
+! 	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph$BuildOperationAwareExecutionAction.execute(DefaultTaskExecutionGraph.java:319)
+! 	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.execute(DefaultPlanExecutor.java:459)
+! 	at org.gradle.execution.plan.DefaultPlanExecutor$ExecutorWorker.run(DefaultPlanExecutor.java:376)
+! 	at org.gradle.execution.plan.DefaultPlanExecutor.process(DefaultPlanExecutor.java:111)
+! 	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph.executeWithServices(DefaultTaskExecutionGraph.java:144)
+! 	at org.gradle.execution.taskgraph.DefaultTaskExecutionGraph.execute(DefaultTaskExecutionGraph.java:129)
+! 	at org.gradle.execution.SelectedTaskExecutionAction.execute(SelectedTaskExecutionAction.java:35)
+! 	at org.gradle.execution.DryRunBuildExecutionAction.execute(DryRunBuildExecutionAction.java:51)
+! 	at org.gradle.execution.BuildOperationFiringBuildWorkerExecutor$ExecuteTasks.call(BuildOperationFiringBuildWorkerExecutor.java:54)
+! 	at org.gradle.execution.BuildOperationFiringBuildWorkerExecutor$ExecuteTasks.call(BuildOperationFiringBuildWorkerExecutor.java:43)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
+! 	at org.gradle.execution.BuildOperationFiringBuildWorkerExecutor.execute(BuildOperationFiringBuildWorkerExecutor.java:40)
+! 	at org.gradle.internal.build.DefaultBuildLifecycleController.lambda$executeTasks$10(DefaultBuildLifecycleController.java:313)
+! 	at org.gradle.internal.model.StateTransitionController.doTransition(StateTransitionController.java:266)
+! 	at org.gradle.internal.model.StateTransitionController.lambda$tryTransition$8(StateTransitionController.java:177)
+! 	at org.gradle.internal.work.DefaultSynchronizer.withLock(DefaultSynchronizer.java:45)
+! 	at org.gradle.internal.model.StateTransitionController.tryTransition(StateTransitionController.java:177)
+! 	at org.gradle.internal.build.DefaultBuildLifecycleController.executeTasks(DefaultBuildLifecycleController.java:304)
+! 	at org.gradle.internal.build.DefaultBuildWorkGraphController$DefaultBuildWorkGraph.runWork(DefaultBuildWorkGraphController.java:220)
+! 	at org.gradle.internal.work.DefaultWorkerLeaseService.withLocks(DefaultWorkerLeaseService.java:263)
+! 	at org.gradle.internal.work.DefaultWorkerLeaseService.runAsWorkerThread(DefaultWorkerLeaseService.java:127)
+! 	at org.gradle.composite.internal.DefaultBuildController.doRun(DefaultBuildController.java:181)
+! 	at org.gradle.composite.internal.DefaultBuildController.access$000(DefaultBuildController.java:50)
+! 	at org.gradle.composite.internal.DefaultBuildController$BuildOpRunnable.lambda$run$0(DefaultBuildController.java:198)
+! 	at org.gradle.internal.operations.CurrentBuildOperationRef.with(CurrentBuildOperationRef.java:84)
+! 	at org.gradle.composite.internal.DefaultBuildController$BuildOpRunnable.run(DefaultBuildController.java:198)
+! 	at org.gradle.internal.concurrent.ExecutorPolicy$CatchAndRecordFailures.onExecute(ExecutorPolicy.java:64)
+! 	at org.gradle.internal.concurrent.AbstractManagedExecutor$1.run(AbstractManagedExecutor.java:47)
+! Caused by: org.gradle.process.ProcessExecutionException: Process 'command '/home/runner/work/app/app/node_modules/@sentry/cli/bin/sentry-cli'' finished with non-zero exit value 1
+! 	at org.gradle.process.internal.DefaultExecHandle$ExecResultImpl.assertNormalExitValue(DefaultExecHandle.java:443)
+! 	at org.gradle.process.internal.DefaultExecAction.execute(DefaultExecAction.java:49)
+! 	at org.gradle.process.internal.DefaultExecActionFactory.exec(DefaultExecActionFactory.java:216)
+! 	at org.gradle.process.internal.DefaultExecOperations.exec(DefaultExecOperations.java:37)
+! 	at org.gradle.process.internal.DefaultExecOperations_Decorated.exec(Unknown Source)
+! 	at org.gradle.internal.classpath.intercept.DefaultCallSiteDecorator.lambda$maybeInstrumentedDynamicCallViaMethodHandle$1(DefaultCallSiteDecorator.java:168)
+! 	at org.gradle.internal.classpath.InstrumentedGroovyCallsHelper.withEntryPoint(InstrumentedGroovyCallsHelper.java:33)
+! 	at org.gradle.internal.classpath.intercept.DefaultCallSiteDecorator.maybeInstrumentedDynamicCallViaMethodHandle(DefaultCallSiteDecorator.java:168)
+! 	at org.gradle.internal.instrumentation.api.groovybytecode.MethodHandleInvocation.callNext(MethodHandleInvocation.java:65)
+! 	at org.gradle.internal.classpath.Instrumented$RuntimeExecInterceptor.intercept(Instrumented.java:667)
+! 	at org.gradle.internal.instrumentation.api.groovybytecode.AbstractCallInterceptor.interceptMethodHandle(AbstractCallInterceptor.java:61)
+! 	at sentry_as0zbyx9h95igl8i518g0u7c1$_run_closure4$_closure8$_closure10$_closure11$_closure18$_closure25.doCall$original(/home/runner/work/app/app/node_modules/@sentry/react-native/sentry.gradle:132)
+! 	at sentry_as0zbyx9h95igl8i518g0u7c1$_run_closure4$_closure8$_closure10$_closure11$_closure18$_closure25.doCall(/home/runner/work/app/app/node_modules/@sentry/react-native/sentry.gradle)
+! 	at org.gradle.api.internal.AbstractTask$ClosureTaskAction.doExecute(AbstractTask.java:769)
+! 	at org.gradle.api.internal.AbstractTask$ClosureTaskAction.lambda$execute$0(AbstractTask.java:756)
+! 	at org.gradle.internal.code.DefaultUserCodeApplicationContext$CurrentApplication.reapply(DefaultUserCodeApplicationContext.java:99)
+! 	at org.gradle.api.internal.AbstractTask$ClosureTaskAction.execute(AbstractTask.java:756)
+! 	at org.gradle.api.internal.AbstractTask$ClosureTaskAction.execute(AbstractTask.java:732)
+! 	at org.gradle.api.internal.tasks.execution.TaskExecution$3.run(TaskExecution.java:252)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:29)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$1.execute(DefaultBuildOperationRunner.java:26)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.run(DefaultBuildOperationRunner.java:47)
+! 	at org.gradle.api.internal.tasks.execution.TaskExecution.executeAction(TaskExecution.java:237)
+! 	at org.gradle.api.internal.tasks.execution.TaskExecution.executeActions(TaskExecution.java:220)
+! 	at org.gradle.api.internal.tasks.execution.TaskExecution.executeWithPreviousOutputFiles(TaskExecution.java:203)
+! 	at org.gradle.api.internal.tasks.execution.TaskExecution.execute(TaskExecution.java:170)
+! 	at org.gradle.internal.execution.steps.ExecuteStep.executeInternal(ExecuteStep.java:105)
+! 	at org.gradle.internal.execution.steps.ExecuteStep.access$000(ExecuteStep.java:44)
+! 	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:59)
+! 	at org.gradle.internal.execution.steps.ExecuteStep$1.call(ExecuteStep.java:56)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:209)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$CallableBuildOperationWorker.execute(DefaultBuildOperationRunner.java:204)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:66)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner$2.execute(DefaultBuildOperationRunner.java:59)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:166)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.execute(DefaultBuildOperationRunner.java:59)
+! 	at org.gradle.internal.operations.DefaultBuildOperationRunner.call(DefaultBuildOperationRunner.java:53)
+! 	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:56)
+! 	at org.gradle.internal.execution.steps.ExecuteStep.execute(ExecuteStep.java:44)
+! 	at org.gradle.internal.execution.steps.CancelExecutionStep.execute(CancelExecutionStep.java:42)
+! 	at org.gradle.internal.execution.steps.TimeoutStep.executeWithoutTimeout(TimeoutStep.java:75)
+! 	at org.gradle.internal.execution.steps.TimeoutStep.execute(TimeoutStep.java:55)

@@ -11,6 +11,7 @@ import { cancelled } from "./link.ts";
 import { requireConfig } from "../project.ts";
 import { ensureGithub } from "./github.ts";
 import { fit } from "../prompts.ts";
+import { whyItFailed } from "../failure.ts";
 import type { components } from "@liftbay/sdk";
 
 type Platform = "ios" | "android";
@@ -134,14 +135,37 @@ async function followLogs(lb: Lb, path: ProjectPath, started: Build[]): Promise<
   );
 }
 
-/** A failed build's last log lines: usually the reason. The whole log is one command away. */
-async function printLogTail(lb: Lb, path: ProjectPath, b: Build, tagged: boolean, count = 30) {
-  const after = Math.max(0, b.logLineCount - count);
-  const page = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}/logs", { params: { path: { ...path, number: b.number }, query: { after } } })).catch(() => null);
-  if (!page?.lines.length) return;
-  p.log.error(`${tagged ? `${b.platform === "ios" ? "iOS" : "Android"} · ` : ""}build #${b.number} failed. The end of its log:`);
-  console.log(page.lines.slice(-count).map((l) => (l.stream === "stderr" ? pc.red(l.text) : pc.dim(l.text))).join("\n"));
+/** Every line of a build's log, page by page (a few thousand lines for a typical build). */
+export async function fetchLog(lb: Lb, path: ProjectPath, number: number, limit = 50_000) {
+  const lines: { text: string; stream: string; phase: string | null }[] = [];
+  let after = 0;
+  while (lines.length < limit) {
+    const page = await poll(() => unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/builds/{number}/logs", { params: { path: { ...path, number }, query: { after } } })));
+    lines.push(...page.lines);
+    after = page.nextSeq;
+    if (page.complete || !page.lines.length) break;
+  }
+  return lines;
+}
+
+/**
+ * Why a failed build failed, in its build tool's own words (see failure.ts); the end of the log when no tool
+ * marked an error. The whole log is one command away.
+ */
+async function printFailure(lb: Lb, path: ProjectPath, b: Build, tagged: boolean) {
+  const log = await fetchLog(lb, path, b.number).catch(() => []);
+  if (!log.length) return [];
+  const why = whyItFailed(log);
+  const label = `${tagged ? `${b.platform === "ios" ? "iOS" : "Android"} · ` : ""}build #${b.number} failed`;
+  if (why.length) {
+    p.log.error(`${label}. Why:`);
+    console.log(why.map((l) => `  ${pc.red(l)}`).join("\n"));
+  } else {
+    p.log.error(`${label}. The end of its log:`);
+    console.log(log.slice(-30).map((l) => (l.stream === "stderr" ? pc.red(l.text) : pc.dim(l.text))).join("\n"));
+  }
   p.log.info(`Whole log: ${pc.cyan(cmd(`liftbay builds logs ${b.number}`))}`);
+  return why;
 }
 
 /** Files `liftbay init` writes or changes; uncommitted, they're the setup the build would be missing. */
@@ -373,7 +397,8 @@ export async function build(opts: BuildOptions) {
 
   // Like EAS: progress by default (each step as it finishes), the full log with --logs or `liftbay builds logs`.
   const results = opts.logs ? await followLogs(lb, path, started) : await followSteps(lb, path, started);
-  for (const r of results.filter((r) => r.status === "failed")) await printLogTail(lb, path, r, started.length > 1);
+  const reasons = new Map<number, string[]>();
+  for (const r of results.filter((r) => r.status === "failed")) reasons.set(r.number, await printFailure(lb, path, r, started.length > 1));
 
   const out = [];
   for (const r of results) {
@@ -392,7 +417,7 @@ export async function build(opts: BuildOptions) {
         p.log.message((await QRCode.toString(link.data.url, { type: "terminal", small: true })).trimEnd());
       }
     }
-    out.push({ ...summary(r), durationSec: r.durationSec, artifacts: r.artifacts, installUrl });
+    out.push({ ...summary(r), durationSec: r.durationSec, artifacts: r.artifacts, installUrl, ...(reasons.has(r.number) ? { failure: reasons.get(r.number) } : {}) });
   }
   const failed = results.filter((r) => r.status !== "succeeded");
   p.outro(failed.length ? pc.red(`${failed.length} build${failed.length > 1 ? "s" : ""} did not succeed`) : "Done");

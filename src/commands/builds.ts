@@ -5,6 +5,8 @@ import { pipeline } from "node:stream/promises";
 import pc from "picocolors";
 import { client, cmd, dashboardUrl, fail, jsonMode, unwrap } from "../context.ts";
 import { requireConfig } from "../project.ts";
+import { whyItFailed } from "../failure.ts";
+import { fetchLog } from "./build.ts";
 
 const FINISHED = new Set(["succeeded", "failed", "cancelled"]);
 const STATUSES = ["queued", "preparing", "running", "uploading", "succeeded", "failed", "cancelled"] as const;
@@ -60,8 +62,14 @@ export async function buildsView(number: string) {
     installUrl = link.data?.url ?? null;
     if (installUrl) console.log(`  Install on a registered device: ${pc.cyan(installUrl)}`);
   }
+  // A failed build: why, in its build tool's own words (agents read this from --json).
+  let failure: string[] | undefined;
+  if (b.status === "failed") {
+    failure = whyItFailed(await fetchLog(client(), path, b.number).catch(() => []));
+    if (failure.length) console.log(`${pc.red("Why it failed:")}\n${failure.map((l) => `  ${pc.red(l)}`).join("\n")}`);
+  }
   console.log(pc.dim(url));
-  return { ...b, url, installUrl };
+  return { ...b, url, installUrl, ...(failure ? { failure } : {}) };
 }
 
 type LogLine = { seq?: number; phase: string | null; stream: string; text: string };
