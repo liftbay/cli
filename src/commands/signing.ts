@@ -3,6 +3,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "n
 import { dirname, relative } from "node:path";
 import * as p from "@clack/prompts";
 import forge from "node-forge";
+
+const lf = (pem: string) => pem.replace(/\r\n/g, "\n");
 import pc from "picocolors";
 import { client, cmd, fail, isInteractive, unwrap } from "../context.ts";
 import { readAppJson, requireConfig, writeAppJson } from "../project.ts";
@@ -35,9 +37,10 @@ export function generateSigningCertificate(commonName: string, years = 10) {
   ]);
   cert.sign(keys.privateKey, forge.md.sha256.create());
   return {
-    privateKeyPem: forge.pki.privateKeyToPem(keys.privateKey),
-    publicKeyPem: forge.pki.publicKeyToPem(keys.publicKey),
-    certificatePem: forge.pki.certificateToPem(cert),
+    // node-forge writes PEM with \r\n; CodePush on iOS strips only \n from the public key and then fails to read it.
+    privateKeyPem: lf(forge.pki.privateKeyToPem(keys.privateKey)),
+    publicKeyPem: lf(forge.pki.publicKeyToPem(keys.publicKey)),
+    certificatePem: lf(forge.pki.certificateToPem(cert)),
   };
 }
 
@@ -136,7 +139,7 @@ export async function signingInit(opts: { privateKey?: string; certificate?: str
       `3. In CI, store the private key as a secret named ${pc.cyan("LIFTBAY_UPDATE_PRIVATE_KEY")}.`,
       `4. Back the key up somewhere safe. If it's lost, apps need a rebuild with a new certificate.`,
       ``,
-      `hot-updater: set ${pc.cyan("HOT_UPDATER_PUBLIC_KEY")} (iOS Info.plist) / ${pc.cyan("com.hotupdater.PUBLIC_KEY")} (Android) to ${DEFAULT_PUBLIC_KEY}.`,
+      `hot-updater: set ${pc.cyan("HOT_UPDATER_PUBLIC_KEY")} (iOS Info.plist) / ${pc.cyan("com.hotupdater.PUBLIC_KEY")} (Android manifest meta-data) to ${DEFAULT_PUBLIC_KEY}.`,
       `CodePush: set ${pc.cyan("CodePushPublicKey")} (iOS) / ${pc.cyan("CodePushPublicKey")} string resource (Android) to ${DEFAULT_PUBLIC_KEY}.`,
     ].join("\n"),
     "Next",

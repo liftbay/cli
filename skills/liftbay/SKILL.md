@@ -235,7 +235,9 @@ The app must have been built once after `liftbay ota init`, so the update URL is
 liftbay update publish --channel production -m "Fix checkout button" --json
 ```
 
-This exports the bundle with `expo export`, uploads only new files, and publishes one release per runtime version. Confirm with the user before publishing to `production`.
+This exports the bundle with `expo export` (CodePush and hot-updater apps: `react-native bundle` plus Hermes, from `"updates": { "client": … }` in `liftbay.json`), uploads only new files, and publishes one release per runtime version. Confirm with the user before publishing to `production`.
+
+**CodePush and hot-updater apps:** `liftbay ota init --client codepush|hot-updater --yes --json` creates the channels and returns the values to put in the native projects (server URL and deployment keys, or the base URL and channel); the user picks and installs the client library. Releases match the app version in the native project; `--target-version 1.5.x` targets a range. CodePush apps can only roll back to an earlier release, never to the bundle inside the app.
 
 Options:
 - `--platform ios|android|all`
@@ -248,7 +250,7 @@ Manage releases:
 ```bash
 liftbay update list --channel production --json
 liftbay update rollout 50 --channel production --json   # change the active release's rollout
-liftbay update rollback --channel production --json     # previous release, or the bundle built into the app
+liftbay update rollback --channel production --json     # previous release, or the bundle built into the app (not CodePush)
 liftbay channels --json
 ```
 

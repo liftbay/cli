@@ -8,7 +8,8 @@ import pc from "picocolors";
 import { client, dashboardUrl, fail, unwrap } from "../context.ts";
 import { expoConfig, output, requireConfig, run } from "../project.ts";
 import { parseEnv } from "./env.ts";
-import { loadPrivateKey, signDraft } from "./signing.ts";
+import { exportRnBundles, nativeAppVersion } from "./rn-bundle.ts";
+import { loadPrivateKey, signDraft, signRsaSha256 } from "./signing.ts";
 import { fit } from "../prompts.ts";
 
 type Platform = "ios" | "android";
@@ -71,8 +72,11 @@ async function runtimeVersion(platform: Platform): Promise<string> {
   return parsed.runtimeVersion;
 }
 
-export async function publish(opts: { channel?: string; profile?: string; message?: string; platform?: string; rollout?: string; mandatory?: boolean; privateKey?: string }) {
+export async function publish(opts: { channel?: string; profile?: string; message?: string; platform?: string; rollout?: string; mandatory?: boolean; privateKey?: string; targetVersion?: string; runtimeVersion?: string }) {
   const config = requireConfig();
+  // CodePush and hot-updater apps are bundled with React Native's own tools, not expo export.
+  const updatesClient = config.updates?.client ?? "expo-updates";
+  const rn = updatesClient === "codepush" || updatesClient === "hot-updater" ? updatesClient : null;
   const lb = client();
   const channel = opts.channel ?? (opts.profile ? config.build?.profiles[opts.profile]?.channel : undefined) ?? "production";
   const platforms: Platform[] = !opts.platform || opts.platform === "all" ? ["ios", "android"] : [opts.platform as Platform];
@@ -101,15 +105,16 @@ export async function publish(opts: { channel?: string; profile?: string; messag
   const names = Object.keys(env.vars);
   if (env.slug) p.log.info(`Variables from the ${pc.bold(env.slug)} environment${names.length ? `: ${names.join(", ")}` : ": none set"}`);
   p.log.step(`Exporting ${platforms.join(" and ")} bundles`);
-  const { out, bundles } = await exportBundles(platforms, env.vars);
+  const { out, bundles } = rn ? await exportRnBundles(rn, platforms, env.vars) : await exportBundles(platforms, env.vars);
   try {
     // Group platforms by runtime version: each group is one release.
     const groups = new Map<string, Platform[]>();
     for (const pl of platforms) {
-      const rv = await runtimeVersion(pl);
+      // CodePush and hot-updater match the binary's version (or, with --runtime-version, a hot-updater fingerprint).
+      const rv = rn ? (opts.runtimeVersion ?? nativeAppVersion(pl) ?? fail(`Couldn't read the ${pl} app version from the native project. Pass --target-version.`)) : await runtimeVersion(pl);
       groups.set(rv, [...(groups.get(rv) ?? []), pl]);
     }
-    const appConfig = await expoConfig();
+    const appConfig = rn ? null : await expoConfig();
 
     const all = platforms.flatMap((pl) => bundles[pl].files);
     const spin = p.spinner();
@@ -135,6 +140,7 @@ export async function publish(opts: { channel?: string; profile?: string; messag
       const body = {
         message,
         runtimeVersion: runtime,
+        ...(rn && !opts.runtimeVersion ? { targetAppVersion: opts.targetVersion ?? runtime } : {}),
         rolloutPercent: Number(opts.rollout ?? 100),
         mandatory: !!opts.mandatory,
         gitRef: gitRef?.ref ?? null,
@@ -144,6 +150,11 @@ export async function publish(opts: { channel?: string; profile?: string; messag
           group.map((pl) => [pl, { launchAsset: bundles[pl].launchAsset, files: bundles[pl].files.map(({ path, sha256, contentType, sizeBytes }) => ({ path, sha256, contentType, sizeBytes })) }]),
         ),
       };
+      // hot-updater 1.0 verifies each file with its own signature, listed in the bundle manifest.
+      if (key && rn === "hot-updater") {
+        const hashes = [...new Set(Object.values(body.bundles).flatMap((b) => b.files.map((f) => f.sha256)))];
+        Object.assign(body, { fileSignatures: Object.fromEntries(hashes.map((sha) => [sha, signRsaSha256(key.pem, Buffer.from(sha, "hex"))])) });
+      }
       const request = key
         ? (async () => {
             const draft = await unwrap(lb.POST("/v1/orgs/{org}/projects/{project}/channels/{channel}/releases/sign", { params: { path: { ...path, channel } }, body }));
@@ -195,10 +206,13 @@ export async function rollback(opts: { channel?: string }) {
   const request = client().POST("/v1/orgs/{org}/projects/{project}/channels/{channel}/releases/{release}/rollback", { params: { path: { ...path, release: active.id } } });
   const res = await unwrap(request);
   console.log(`${pc.green("✔")} Rolled back "${active.message}". ${res.active ? "The previous release is active again." : "Devices return to the bundle built into the app."}`);
+  // The CodePush client never asks to go back to the bundle in the app, so its devices keep this release.
+  const codepush = !res.active && requireConfig().updates?.client === "codepush";
+  if (codepush) console.log(`${pc.yellow("!")} CodePush apps keep running it: CodePush can't go back to the bundle in the app. Publish the code the app was built with to replace it.`);
   // The plan's OTA bandwidth is used up: the rollback still reaches devices, newer updates wait.
   const notice = (await request).response.headers.get("Liftbay-Notice");
   if (notice) console.log(`${pc.yellow("!")} ${notice}`);
-  return { rolledBack: { id: active.id, message: active.message }, active: res.active, notice };
+  return { rolledBack: { id: active.id, message: active.message }, active: res.active, notice, ...(codepush ? { warning: "CodePush apps keep running the rolled-back release; publish the code the app was built with to replace it" } : {}) };
 }
 
 export async function rollout(percent: string, opts: { channel?: string }) {

@@ -25,11 +25,13 @@ export type InitAnswers = {
   eas?: boolean;
   ota?: boolean;
   runtimePolicy?: "appVersion" | "fingerprint";
+  /** The update library: expo-updates (default), codepush or hot-updater. */
+  client?: "expo-updates" | "codepush" | "hot-updater";
   /** .env files to import, per environment: { "production": [".env.production"] }. */
   envFiles?: Record<string, string[]>;
 };
 
-const KEYS: (keyof InitAnswers)[] = ["org", "newOrg", "project", "newProject", "platforms", "iosEngine", "eas", "ota", "runtimePolicy", "envFiles"];
+const KEYS: (keyof InitAnswers)[] = ["org", "newOrg", "project", "newProject", "platforms", "iosEngine", "eas", "ota", "runtimePolicy", "client", "envFiles"];
 
 /** Reads and checks an answers file; every mistake is reported at once, by field. */
 export function readAnswers(path: string): InitAnswers {
@@ -50,6 +52,7 @@ export function readAnswers(path: string): InitAnswers {
   ["eas", "ota"].forEach(bool);
   oneOf("iosEngine", ["github-actions", "xcode-cloud"]);
   oneOf("runtimePolicy", ["appVersion", "fingerprint"]);
+  oneOf("client", ["expo-updates", "codepush", "hot-updater"]);
   if (a.org && a.newOrg) problems.push("give org or newOrg, not both");
   if (a.project && a.newProject) problems.push("give project or newProject, not both");
   if (a.platforms !== undefined && (!Array.isArray(a.platforms) || !a.platforms.length || !a.platforms.every((x) => x === "ios" || x === "android"))) {
@@ -75,6 +78,7 @@ export function answersToOptions(a: InitAnswers): SetupOptions & { ota?: boolean
     eas: a.eas,
     ota: a.ota,
     runtimePolicy: a.runtimePolicy,
+    client: a.client,
     yes: true,
   };
 }

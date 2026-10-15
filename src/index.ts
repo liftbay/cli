@@ -15,7 +15,7 @@ import { githubConnect, githubStatus, githubWorkflow } from "./commands/github.t
 
 const program = new Command("liftbay")
   .description("Build, ship and update React Native apps")
-  .version("0.7.3")
+  .version("0.8.0")
   .option("--json", "print the result as JSON on stdout (progress goes to stderr; never prompts). Also LIFTBAY_JSON=1")
   .hook("preAction", () => {
     if (program.opts().json || process.env.LIFTBAY_JSON === "1") enableJson();
@@ -36,6 +36,7 @@ const setupOptions = (cmd: Command) =>
     .option("--project <slug>", "project slug (created if it doesn't exist)")
     .option("--platforms <list>", "ios, android or all")
     .option("--runtime-policy <policy>", "appVersion or fingerprint")
+    .option("--client <client>", "update library: expo-updates, codepush or hot-updater (default: what the app uses)")
     .option("--ios-engine <engine>", "project setting: where iOS store builds run, github-actions or xcode-cloud")
     .option("--no-eas", "don't use eas.json's build profiles and env, even if there is one")
     .option("-y, --yes", "accept defaults, no prompts")
@@ -239,6 +240,8 @@ update
   .option("--rollout <percent>", "start with a partial rollout", "100")
   .option("--mandatory", "apply immediately instead of on next launch")
   .option("--private-key <file>", "update signing key (default: LIFTBAY_UPDATE_PRIVATE_KEY, then keys/liftbay-private-key.pem)")
+  .option("--target-version <range>", "CodePush and hot-updater: binary versions that get it, e.g. 1.5.x (default: the app's version)")
+  .option("--runtime-version <value>", "hot-updater fingerprint strategy: the fingerprint the update is for")
   .action(wrap(publish));
 const signing = update.command("signing").description("Sign updates with your own key (expo-updates, hot-updater, CodePush)");
 signing

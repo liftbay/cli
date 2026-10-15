@@ -12,7 +12,8 @@ import { ensureSignedIn } from "./auth.ts";
 import { ensureEnvironment, envImport, importVariables, printImport, readEasProfiles, type ImportResult } from "./env.ts";
 import { cancelled, ensureLinked, type LinkOptions } from "./link.ts";
 
-export type SetupOptions = LinkOptions & { platforms?: string; iosEngine?: string; runtimePolicy?: "appVersion" | "fingerprint"; apiUrl?: string; dashboardUrl?: string; eas?: boolean };
+export type UpdatesClient = "expo-updates" | "codepush" | "hot-updater";
+export type SetupOptions = LinkOptions & { platforms?: string; iosEngine?: string; runtimePolicy?: "appVersion" | "fingerprint"; apiUrl?: string; dashboardUrl?: string; eas?: boolean; client?: UpdatesClient };
 
 const DEFAULT_PROFILES: Record<string, Omit<BuildProfile, "platforms">> = {
   development: { environment: "development", channel: "development", distribution: "internal" },
@@ -193,8 +194,98 @@ async function addDependency(app: DetectedApp, spec: string, label: string) {
   await runQuiet(label, app.packageManager, args);
 }
 
+/** The update library the app uses: what it already depends on, or (plain React Native) the person's pick. */
+async function pickUpdatesClient(app: DetectedApp, config: LiftbayConfig, opts: SetupOptions): Promise<UpdatesClient> {
+  if (opts.client) return opts.client;
+  if (config.updates?.client) return config.updates.client;
+  const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { dependencies?: Record<string, string> };
+  const deps = pkg.dependencies ?? {};
+  if (deps["@hot-updater/react-native"]) return "hot-updater";
+  if (deps["@code-push-next/react-native-code-push"] || deps["react-native-code-push"] || deps["@revopush/react-native-code-push"]) return "codepush";
+  if (app.hasExpoModules || app.framework === "expo" || opts.yes || !isInteractive()) return "expo-updates";
+  return cancelled(
+    await p.select({
+      message: "Which update library should the app use?",
+      options: [
+        { value: "expo-updates" as const, label: "expo-updates", hint: "installs Expo Modules; recommended" },
+        { value: "hot-updater" as const, label: "hot-updater", hint: "you add @hot-updater/react-native" },
+        { value: "codepush" as const, label: "CodePush", hint: "you add @code-push-next/react-native-code-push" },
+      ],
+    }),
+  );
+}
+
+/** One channel per build profile, bound to that profile's environment, serving the client's protocol. */
+async function ensureChannels(config: LiftbayConfig, protocol: "expo" | "codepush" | "hot-updater") {
+  const lb = client();
+  const path = { org: config.org, project: config.project };
+  const profiles = config.build?.profiles ?? Object.fromEntries(Object.entries(DEFAULT_PROFILES).map(([n, pr]) => [n, { ...pr, platforms: ["ios", "android"] as ("ios" | "android")[] }]));
+  const envs = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/environments", { params: { path } }));
+  const channels = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/channels", { params: { path } }));
+  for (const prof of Object.values(profiles)) {
+    const existing = channels.find((c) => c.name === prof.channel);
+    const env = envs.find((e) => e.slug === prof.environment);
+    if (!env) fail(`Environment ${prof.environment} not found; run \`liftbay ci init\` first`);
+    if (!existing) {
+      await unwrap(lb.POST("/v1/orgs/{org}/projects/{project}/channels", { params: { path }, body: { name: prof.channel, environmentId: env.id, protocols: [protocol] } }));
+      p.log.success(`Created channel ${pc.bold(prof.channel)} → ${prof.environment}`);
+    } else if (!existing.protocols.includes(protocol)) {
+      await unwrap(
+        lb.PATCH("/v1/orgs/{org}/projects/{project}/channels/{channel}", { params: { path: { ...path, channel: prof.channel } }, body: { protocols: [...existing.protocols, protocol] } }),
+      );
+      p.log.success(`Enabled ${protocol} on channel ${pc.bold(prof.channel)}`);
+    }
+  }
+  return { profiles, channels: await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/channels", { params: { path } })) };
+}
+
+/**
+ * CodePush and hot-updater: channels with their protocol, and the values to put in the native projects. The
+ * client library itself stays the person's choice (and its version), so it isn't installed here.
+ */
+async function otaInitRn(config: LiftbayConfig, updatesClient: "codepush" | "hot-updater"): Promise<LiftbayConfig> {
+  const { profiles, channels } = await ensureChannels(config, updatesClient);
+  const production = channels.find((c) => c.name === profiles.production?.channel) ?? channels[0];
+  if (updatesClient === "codepush") {
+    const cp = production?.connect.codepush;
+    if (!cp) fail("The server did not return CodePush settings for the channel");
+    p.note(
+      [
+        `Server URL: ${cp.serverUrl}`,
+        `iOS Info.plist:  CodePushServerURL = ${cp.serverUrl}`,
+        `                 CodePushDeploymentKey = ${cp.deploymentKeys.ios}`,
+        `Android strings: CodePushServerUrl = ${cp.serverUrl}`,
+        `                 CodePushDeploymentKey = ${cp.deploymentKeys.android}`,
+        "",
+        `Those keys are the ${production!.name} channel's; each channel's are <channel id>.ios / .android`,
+        `(see ${cmd("liftbay channels")}). Client: @code-push-next/react-native-code-push for React Native 0.76+.`,
+      ].join("\n"),
+      "Add to your native projects",
+    );
+  } else {
+    const hu = production?.connect.hotUpdater;
+    if (!hu) fail("The server did not return hot-updater settings for the channel");
+    p.note(
+      [
+        `baseURL: ${hu.baseURL}`,
+        `  hot-updater 1.x: HotUpdater.init({ baseURL: "${hu.baseURL}" })`,
+        `  hot-updater 0.x: HotUpdater.wrap({ baseURL: "${hu.baseURL}", updateStrategy: "appVersion" })`,
+        "Channel (the build's channel, e.g. production):",
+        "  iOS Info.plist: HOT_UPDATER_CHANNEL",
+        '  Android: <meta-data android:name="com.hotupdater.CHANNEL" android:value="…"/> in AndroidManifest.xml',
+      ].join("\n"),
+      "Add to your app",
+    );
+  }
+  const next: LiftbayConfig = { ...config, updates: { client: updatesClient } };
+  writeConfig(next);
+  return next;
+}
+
 /** expo-updates, the Liftbay config plugin, channels per build profile and the runtime version policy. */
 export async function otaInit(app: DetectedApp, config: LiftbayConfig, opts: SetupOptions): Promise<LiftbayConfig> {
+  const updatesClient = await pickUpdatesClient(app, config, opts);
+  if (updatesClient !== "expo-updates") return otaInitRn(config, updatesClient);
   const lb = client();
   const path = { org: config.org, project: config.project };
 
@@ -226,25 +317,7 @@ export async function otaInit(app: DetectedApp, config: LiftbayConfig, opts: Set
           );
   }
 
-  // One channel per build profile, bound to that profile's environment, serving expo-updates.
-  const profiles = config.build?.profiles ?? Object.fromEntries(Object.entries(DEFAULT_PROFILES).map(([n, pr]) => [n, { ...pr, platforms: ["ios", "android"] as ("ios" | "android")[] }]));
-  const envs = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/environments", { params: { path } }));
-  let channels = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/channels", { params: { path } }));
-  for (const prof of Object.values(profiles)) {
-    const existing = channels.find((c) => c.name === prof.channel);
-    const env = envs.find((e) => e.slug === prof.environment);
-    if (!env) fail(`Environment ${prof.environment} not found; run \`liftbay ci init\` first`);
-    if (!existing) {
-      await unwrap(lb.POST("/v1/orgs/{org}/projects/{project}/channels", { params: { path }, body: { name: prof.channel, environmentId: env.id, protocols: ["expo"] } }));
-      p.log.success(`Created channel ${pc.bold(prof.channel)} → ${prof.environment}`);
-    } else if (!existing.protocols.includes("expo")) {
-      await unwrap(
-        lb.PATCH("/v1/orgs/{org}/projects/{project}/channels/{channel}", { params: { path: { ...path, channel: prof.channel } }, body: { protocols: [...existing.protocols, "expo"] } }),
-      );
-      p.log.success(`Enabled expo-updates on channel ${pc.bold(prof.channel)}`);
-    }
-  }
-  channels = await unwrap(lb.GET("/v1/orgs/{org}/projects/{project}/channels", { params: { path } }));
+  const { profiles, channels } = await ensureChannels(config, "expo");
   const production = channels.find((c) => c.name === profiles.production?.channel) ?? channels[0];
   const updatesUrl = production?.connect.expo?.url;
   if (!updatesUrl) fail("The server did not return an expo-updates URL for the channel");
